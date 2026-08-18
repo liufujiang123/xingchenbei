@@ -20,7 +20,8 @@ namespace optiling {
         uint32_t size_x = tensor_x->GetSize(); // 获取内存大小
         // 示例: 获取算子输入属性
         const gert::RuntimeAttrs *attrs = context->GetAttrs();
-        const int64_t *attr_expand_num = attrs->GetInt(0);
+        const int64_t *attr_mhc_mult = attrs->GetInt(0);
+        const bool *attr_backward = attrs->GetBool(1);
         // 示例: 配置tiling key, 从而实现kernel侧不同数据类型/算法的区分
         uint32_t DT_X = static_cast<uint32_t>(dtype_x);
         ASCENDC_TPL_SEL_PARAM(context, DT_X);
@@ -51,13 +52,14 @@ namespace ops {
         explicit MhcExpand(const char *name) : OpDef(name) {
             this->Input("x")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+                .DataType({ge::DT_BF16, ge::DT_FLOAT16})
                 .Format({ge::FORMAT_ND, ge::FORMAT_ND});
-            this->Output("y")
+            this->Output("o")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+                .DataType({ge::DT_BF16, ge::DT_FLOAT16})
                 .Format({ge::FORMAT_ND, ge::FORMAT_ND});
-            this->Attr("expand_num").AttrType(REQUIRED).Int();
+            this->Attr("mhc_mult").AttrType(OPTIONAL).Int(2);
+            this->Attr("backward").AttrType(OPTIONAL).Bool();
             this->SetInferShape(ge::InferShape).SetInferDataType(ge::InferDataType);
             this->AICore()
                 .SetTiling(optiling::TilingFunc)
@@ -66,4 +68,3 @@ namespace ops {
     };
     OP_ADD(MhcExpand);
 }  // namespace ops
-
