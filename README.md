@@ -9,7 +9,11 @@ The harness separates four concerns:
 3. **Ascend expertise** — official Ascend Agent Skills are bootstrapped into `.agents/skills/`.
 4. **Evaluation-driven optimization** — candidates must pass guard → build → correctness before benchmark/profile evidence can promote them.
 
-The first task slot is `tasks/sparse_flash_attention/`.
+Current task workspaces:
+
+- `tasks/sparse_flash_attention/`
+- `tasks/mhc_expand/`
+- `tasks/mhc_sinkhorn/`
 
 ## Quick start on an Ascend machine
 
