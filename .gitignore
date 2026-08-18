@@ -1,0 +1,30 @@
+# Local agent dependencies and machine config
+.agent-deps/
+config/agent.env
+
+# Experiment/profiler outputs
+runs/*
+!runs/.gitkeep
+profiles/*
+!profiles/.gitkeep
+
+# Competition build artifacts
+build/
+build_out/
+output/
+dist/
+*.run
+*.o
+*.so
+*.log
+PROF_*
+OPPROF_*
+extra-info/
+
+# Python/editor noise
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.idea/
+.DS_Store

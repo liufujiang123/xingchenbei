@@ -1,0 +1,6 @@
+# Optional interface guard configuration.
+# Copy to config/protected_paths.txt after the official template is imported.
+# One repository-relative file path per line. Lines beginning with # are ignored.
+#
+# Example:
+# tasks/sparse_flash_attention/workspace/code/op_host/dsa_sfa.cpp
