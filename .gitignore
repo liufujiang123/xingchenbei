@@ -2,6 +2,17 @@
 .agent-deps/
 config/agent.env
 
+# Runtime-generated skill/reference symlinks
+.agents/skills/ascendc-*
+.agents/skills/cannjudge-submit
+docs/kda-prompts
+
+# CANNJudge credential/key material must stay local
+**/private.pem
+**/public.pem
+**/*cannjudge*credential*
+**/*cannjudge*secret*
+
 # Experiment/profiler outputs
 runs/*
 !runs/.gitkeep
