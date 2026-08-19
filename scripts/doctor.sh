@@ -29,3 +29,8 @@ if [[ -d "$ROOT/.agents/skills/ascendc-operator-design" ]]; then
 else
   echo "missing: Ascend skills; run scripts/bootstrap_skills.sh"
 fi
+if [[ -f "$ROOT/.agents/skills/cannjudge-submit/SKILL.md" ]]; then
+  echo "ok: CANNJudge skill bootstrapped"
+else
+  echo "missing: CANNJudge skill; run scripts/bootstrap_skills.sh"
+fi
