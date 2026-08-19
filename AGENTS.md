@@ -7,11 +7,11 @@ The closest nested `AGENTS.md`, when present, overrides this file for that subtr
 
 When instructions conflict, use this order:
 
-1. competition problem statement and platform submission contract;
+1. competition problem statement and platform submission contract, including current CANNJudge evidence for the matching problem ID;
 2. this repository `AGENTS.md` and any closer nested `AGENTS.md`;
 3. the official competition template and existing public interface;
 4. installed Ascend Agent Skills;
-5. KDA-style optimization hypotheses and external references;
+5. CANNJudge/CANN engineering helper skills and KDA-style optimization references;
 6. the agent's own assumptions.
 
 Never change a higher-priority contract to make a lower-priority idea easier to implement.
@@ -55,7 +55,7 @@ Do not hardcode one visible shape unless the task contract explicitly states tha
 
 ## Ascend Skills
 
-Prefer the installed official Ascend skills for domain-specific decisions:
+Prefer the installed official `Ascend/agent-skills` skills for domain-specific decisions:
 
 - `ascendc-operator-design`
 - `ascendc-operator-code-gen`
@@ -68,6 +68,23 @@ Prefer the installed official Ascend skills for domain-specific decisions:
 - `xingchen-kernel-optimizer` (repository-local orchestration skill)
 
 Do not run generic project-initialization skills inside a competition-provided template unless explicitly requested.
+
+## CANNJudge platform skills
+
+The bootstrap also exposes the official CANN `cann-learning-hub` skills:
+
+- `cannjudge-submit`: platform interaction only — obtain current problem metadata, download/compare the official package, submit code when explicitly authorized, query submission results, and inspect rankings.
+- `ascendc-ops-project`: supporting dependency/reference for the CANNJudge skill. For core Ascend C design, implementation, precision, and performance decisions, prefer the dedicated `Ascend/agent-skills` skills above.
+
+Rules for CANNJudge usage:
+
+- Treat a current CANNJudge response/package for the verified matching problem ID as authoritative platform evidence. Do not infer hidden testcase contents.
+- Do not overwrite the checked-in competition workspace merely because a freshly downloaded package differs; compare and report the difference first.
+- Do not submit to CANNJudge unless the user explicitly requests or authorizes a submission in the current task/session.
+- Never ask the user to paste a plaintext CANNJudge password into chat or source files. Follow the skill's RSA-encrypted credential workflow.
+- Never print, copy into logs, or commit decrypted passwords, cookies, tokens, RSA private keys, or credential ciphertext.
+- Keep generated key material local. `private.pem`, `public.pem`, dependency checkouts, and generated skill symlinks are ignored by Git.
+- Do not attempt to discover or access hidden testcases. Use only platform-supported problem, package, submission-result, and ranking interfaces.
 
 ## Required optimization loop
 
@@ -92,6 +109,7 @@ Before a large implementation:
 
 - read the task contract under `tasks/<task>/TASK.md`;
 - inspect the competition statement/template;
+- use CANNJudge platform evidence to resolve platform-contract ambiguity when available;
 - establish a compiling correctness baseline;
 - keep `tasks/<task>/design.md` current with dataflow, tiling, memory plan, core split, precision risks, and optimization candidates;
 - keep `tasks/<task>/optimization-log.md` evidence-based.
