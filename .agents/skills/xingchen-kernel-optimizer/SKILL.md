@@ -14,7 +14,21 @@ Use this skill for competition-kernel implementation and optimization inside thi
 3. Run `git status --short`.
 4. Inspect the existing operator with `rg` / `rg --files`.
 5. Identify the immutable platform-visible interface.
-6. If no correctness baseline exists, prioritize that before performance work.
+6. If the platform contract is ambiguous and CANNJudge access is available, use `cannjudge-submit` to obtain current problem/package evidence before guessing.
+7. If no correctness baseline exists, prioritize that before performance work.
+
+## Platform routing
+
+Use `cannjudge-submit` for CANNJudge-specific work:
+
+- verify current problem metadata/problem ID;
+- download an official package into a temporary location and compare it with the checked-in template;
+- submit code only when the user explicitly authorizes submission;
+- query submission status/results and rankings.
+
+Do not use platform tooling to infer or access hidden testcases. Never ask for a plaintext CANNJudge password or echo credential material. Follow the official RSA-encrypted workflow.
+
+The supporting `ascendc-ops-project` skill is installed because `cannjudge-submit` declares it as a dependency. For core technical implementation decisions in this repository, prefer the dedicated Ascend skills below.
 
 ## Ascend domain routing
 
@@ -86,6 +100,8 @@ A candidate may be promoted only when:
 - it does not narrow the required functional domain.
 
 Record the measured result and decision in `tasks/<task>/optimization-log.md`.
+
+If CANNJudge is used as an additional evaluator, record the submission ID and returned status/score evidence without recording credentials. Do not equate a public leaderboard improvement with correctness if required cases did not pass.
 
 ## Search dimensions for attention-like sparse kernels
 
