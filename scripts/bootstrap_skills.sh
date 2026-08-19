@@ -18,6 +18,7 @@ sync_repo() {
 
 sync_repo https://github.com/Ascend/agent-skills.git "$DEPS/ascend-agent-skills" master
 sync_repo https://github.com/mit-han-lab/kernel-design-agents.git "$DEPS/kernel-design-agents" main
+sync_repo https://gitcode.com/cann/cann-learning-hub.git "$DEPS/cann-learning-hub" master
 
 ASCEND_BASE="$DEPS/ascend-agent-skills/skills"
 for skill in \
@@ -31,7 +32,19 @@ for skill in \
   ascendc-operator-performance-optim; do
   src="$ASCEND_BASE/$skill"
   if [[ ! -f "$src/SKILL.md" ]]; then
-    echo "Expected official skill not found: $src" >&2
+    echo "Expected official Ascend skill not found: $src" >&2
+    exit 1
+  fi
+  ln -sfn "$src" "$SKILLS/$skill"
+done
+
+CANN_BASE="$DEPS/cann-learning-hub/skills"
+for skill in \
+  cannjudge-submit \
+  ascendc-ops-project; do
+  src="$CANN_BASE/$skill"
+  if [[ ! -f "$src/SKILL.md" ]]; then
+    echo "Expected official CANN skill not found: $src" >&2
     exit 1
   fi
   ln -sfn "$src" "$SKILLS/$skill"
