@@ -1,6 +1,7 @@
 # Local agent dependencies and machine config
 .agent-deps/
 config/agent.env
+config/tasks/*.local.env
 
 # Runtime-generated skill/reference symlinks
 .agents/skills/ascendc-*
@@ -12,12 +13,15 @@ docs/kda-prompts
 **/public.pem
 **/*cannjudge*credential*
 **/*cannjudge*secret*
+**/*cannjudge*ciphertext*
 
 # Experiment/profiler outputs
 runs/*
 !runs/.gitkeep
 profiles/*
 !profiles/.gitkeep
+tasks/*/runs/harness/
+tasks/*/runs/cannjudge/
 
 # Competition build artifacts
 build/
