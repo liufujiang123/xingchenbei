@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Task-scoped evidence loop for Ascend competition kernels.
 
-Codex edits code; this tool standardizes gates, records evidence, and keeps
-local and CANNJudge best scores separate. Platform submission is never implicit.
+Codex edits code; this tool standardizes design, correctness, benchmark, profile
+and platform gates. It keeps local and CANNJudge best scores separate, turns
+source/profile evidence into small research-derived shortlists, and never makes
+platform submission implicit.
 """
 from __future__ import annotations
 
@@ -14,6 +16,9 @@ import pathlib
 import re
 import subprocess
 import sys
+
+import ascend_design_analyze
+import ascend_perf_analyze
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PLATFORM_PASS_STATUSES = {"Accepted", "Pass"}
@@ -96,8 +101,15 @@ def run_stage(stage, command, env, cwd):
 
 def git_meta():
     def output(*args):
-        proc = subprocess.run(["git"] + list(args), cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.run(
+            ["git"] + list(args),
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
         return proc.stdout.strip() if proc.returncode == 0 else None
+
     return {
         "head": output("rev-parse", "HEAD"),
         "branch": output("branch", "--show-current"),
@@ -157,17 +169,151 @@ def promote_decision(record, best_path, score, direction, prefix):
     return decision
 
 
+def env_bool(env, key, default=False):
+    raw = env.get(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def split_list(value):
+    if not value:
+        return []
+    return [item for item in re.split(r"[\s,;:]+", value.strip()) if item]
+
+
+def configured_source_paths(task_dir, workspace, env, key):
+    raw = env.get(key, "").strip()
+    items = split_list(raw)
+    paths = []
+    if items:
+        for item in items:
+            path = pathlib.Path(item).expanduser()
+            if not path.is_absolute():
+                path = ROOT / path
+            paths.append(path)
+    else:
+        paths = [workspace, task_dir]
+
+    out = []
+    seen = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        out.append(path)
+    return out
+
+
+def relative_paths(paths):
+    return [
+        str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+        for path in paths
+    ]
+
+
+def attach_design(record, task_dir, workspace, env, cli_archetypes=None):
+    sources = configured_source_paths(task_dir, workspace, env, "DESIGN_SOURCE_DIRS")
+    archetypes = split_list(env.get("DESIGN_ARCHETYPES", ""))
+    archetypes.extend(cli_archetypes or [])
+    limit = max(0, int(env.get("DESIGN_PATTERN_LIMIT", "20").strip()))
+
+    design = ascend_design_analyze.analyze(
+        sources,
+        archetypes=archetypes,
+        limit=limit,
+    )
+    design["source_dirs"] = relative_paths(sources)
+    record["design"] = design
+
+    print("\n===== ASCEND DESIGN =====")
+    print("status=%s" % design["status"])
+    print("declared_archetypes=%s" % (",".join(design["declared_archetypes"]) or "none"))
+    print("suggested_archetypes=%s" % (",".join(design["suggested_archetypes"]) or "none"))
+    print("static_signal_tags=%s" % (",".join(sorted(design["static_signals"])) or "none"))
+    print("unknowns=%s" % ("; ".join(design["unknowns"]) or "none"))
+    for index, decision in enumerate(design["decisions"][:12], 1):
+        print("design_decision_%d=%s" % (index, decision["id"]))
+    if len(design["decisions"]) > 12:
+        print("design_decision_more=%d" % (len(design["decisions"]) - 12))
+    print("design_rule=%s" % design["rule"])
+
+
+def profile_output(record):
+    chunks = []
+    for stage in record.get("stages", []):
+        if stage.get("stage") == "profile":
+            chunks.append(stage.get("output", ""))
+    return "\n".join(chunks)
+
+
+def attach_diagnosis(record, task_dir, workspace, env, advanced=False):
+    configured_class = env.get("PERF_OPERATOR_CLASS", "auto").strip() or "auto"
+    if configured_class not in ("auto", "vector", "cube", "mixed_cv"):
+        raise ValueError("PERF_OPERATOR_CLASS must be auto/vector/cube/mixed_cv")
+    hints = split_list(env.get("PERF_BOTTLENECK_HINTS", ""))
+    limit = max(0, int(env.get("PERF_PLAN_LIMIT", "5").strip()))
+    include_advanced = advanced or env_bool(env, "PERF_ADVANCED", False)
+
+    sources = configured_source_paths(task_dir, workspace, env, "PERF_SOURCE_DIRS")
+    diagnosis = ascend_perf_analyze.analyze(
+        sources,
+        profile_text=profile_output(record),
+        operator_class=configured_class,
+        bottleneck_hints=hints,
+        include_advanced=include_advanced,
+        limit=limit,
+    )
+    diagnosis["source_dirs"] = relative_paths(sources)
+    record["diagnosis"] = diagnosis
+
+    print("\n===== ASCEND DIAGNOSIS =====")
+    print(
+        "operator_class=%s source=%s confidence=%s"
+        % (
+            diagnosis["operator_class"] or "unresolved",
+            diagnosis["operator_class_source"],
+            diagnosis["confidence"],
+        )
+    )
+    print("observed_bottlenecks=%s" % (",".join(diagnosis["observed_bottlenecks"]) or "none"))
+    print("static_risk_tags=%s" % (",".join(diagnosis["static_risk_tags"]) or "none"))
+    print("planning_tags=%s" % (",".join(diagnosis["planning_tags"]) or "none"))
+    for index, candidate in enumerate(diagnosis["candidates"], 1):
+        print(
+            "candidate_%d=%s matched=%s"
+            % (index, candidate["id"], ",".join(candidate["matched_tags"]))
+        )
+    print("diagnosis_rule=%s" % diagnosis["rule"])
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["validate", "baseline", "candidate", "profile", "platform"])
+    parser.add_argument(
+        "mode",
+        choices=["design", "validate", "baseline", "candidate", "profile", "diagnose", "platform"],
+    )
     parser.add_argument("--task")
     parser.add_argument("--config")
     parser.add_argument("--name")
     parser.add_argument("--hypothesis")
+    parser.add_argument(
+        "--archetype",
+        action="append",
+        default=[],
+        help="explicit contract-derived design archetype; may be repeated",
+    )
     parser.add_argument("--submit", action="store_true", help="explicitly authorize a CANNJudge submission")
     parser.add_argument("--skip-guard", action="store_true")
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-validate", action="store_true")
+    parser.add_argument("--skip-profile", action="store_true")
+    parser.add_argument(
+        "--advanced-diagnosis",
+        action="store_true",
+        help="include API/SOC-sensitive research patterns in diagnosis",
+    )
     args = parser.parse_args()
 
     config_path = resolve_config(args.task, args.config)
@@ -206,22 +352,35 @@ def main():
     }
 
     stages = []
-    if not args.skip_guard:
-        stages.append("guard")
-    if not args.skip_build:
-        stages.append("build")
-    if not args.skip_validate:
-        stages.append("validate")
-    if args.mode in ("baseline", "candidate"):
-        stages.append("bench")
-    elif args.mode == "profile":
-        stages.append("profile")
-    elif args.mode == "platform":
-        cfg_arg = str(config_path.relative_to(ROOT)) if config_path.is_relative_to(ROOT) else str(config_path)
-        commands["platform"] = "%s tools/cannjudge_eval.py submit --task %s --config %s --yes-submit" % (
-            shq(sys.executable), shq(task), shq(cfg_arg)
-        )
-        stages.append("platform")
+    if args.mode == "design":
+        # Design must work before a compiling baseline exists. Only the repository
+        # guard is meaningful by default at this stage.
+        if not args.skip_guard:
+            stages.append("guard")
+    else:
+        if not args.skip_guard:
+            stages.append("guard")
+        if not args.skip_build:
+            stages.append("build")
+        if not args.skip_validate:
+            stages.append("validate")
+
+        if args.mode in ("baseline", "candidate"):
+            stages.append("bench")
+        elif args.mode == "profile":
+            if not args.skip_profile:
+                stages.append("profile")
+        elif args.mode == "diagnose":
+            if not args.skip_profile and commands["profile"].strip():
+                stages.append("profile")
+        elif args.mode == "platform":
+            cfg_arg = str(config_path.relative_to(ROOT)) if config_path.is_relative_to(ROOT) else str(config_path)
+            commands["platform"] = "%s tools/cannjudge_eval.py submit --task %s --config %s --yes-submit" % (
+                shq(sys.executable),
+                shq(task),
+                shq(cfg_arg),
+            )
+            stages.append("platform")
 
     for stage in stages:
         command = commands.get(stage, "").strip()
@@ -253,10 +412,40 @@ def main():
     else:
         record.setdefault("decision", "passed")
 
+    if record.get("decision", "passed") == "passed" and args.mode == "design":
+        try:
+            attach_design(
+                record,
+                task_dir,
+                workspace,
+                env,
+                cli_archetypes=args.archetype,
+            )
+        except Exception as exc:
+            record["design_error"] = "%s: %s" % (type(exc).__name__, exc)
+            record["decision"] = "reject:design_failed"
+
+    if record.get("decision", "passed") == "passed" and args.mode in ("profile", "diagnose"):
+        try:
+            attach_diagnosis(
+                record,
+                task_dir,
+                workspace,
+                env,
+                advanced=args.advanced_diagnosis,
+            )
+        except Exception as exc:
+            record["diagnosis_error"] = "%s: %s" % (type(exc).__name__, exc)
+            record["decision"] = "reject:diagnosis_failed"
+
     if "decision" not in record or record["decision"] == "passed":
         if args.mode in ("baseline", "candidate") and "score" in record:
             record["decision"] = promote_decision(
-                record, runs / "best-local.json", record["score"], record["direction"], "local"
+                record,
+                runs / "best-local.json",
+                record["score"],
+                record["direction"],
+                "local",
             )
         elif args.mode == "platform":
             platform = record.get("platform", {})
@@ -267,12 +456,20 @@ def main():
                 else:
                     direction = env.get("PLATFORM_SCORE_DIRECTION", "higher")
                     record["decision"] = promote_decision(
-                        record, runs / "best-platform.json", platform["score"], direction, "platform"
+                        record,
+                        runs / "best-platform.json",
+                        platform["score"],
+                        direction,
+                        "platform",
                     )
             elif status in ("Running", "Pending", "Queued"):
                 record["decision"] = "pending:platform_%s" % status.lower()
             else:
                 record["decision"] = "reject:platform_%s" % safe_name(status.lower())
+        elif args.mode == "design":
+            record["decision"] = "passed:design"
+        elif args.mode == "diagnose":
+            record["decision"] = "passed:diagnosis"
         else:
             record["decision"] = "passed"
 
