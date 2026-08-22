@@ -13,21 +13,25 @@ namespace optiling {
         uint64_t ub_size;
         platform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ub_size);
         // 示例: 获取算子输入数组信息
-        const gert::Tensor *tensor_score = context->GetRequiredInputTensor(0);
-        ge::DataType dtype_score = tensor_score->GetDataType(); // 获取数据类型
-        int dtype_size_score = ge::GetSizeByDataType(dtype_score); // 获取数据类型的字长
-        uint32_t length_score = tensor_score->GetShapeSize(); // 获取元素个数
-        uint32_t size_score = tensor_score->GetSize(); // 获取内存大小
+        const gert::Tensor *tensor_logits = context->GetRequiredInputTensor(0);
+        const gert::Tensor *tensor_mask = context->GetOptionalInputTensor(1);
+        if(tensor_mask) {
+            // 可选输入数组存在
+        }
+        ge::DataType dtype_logits = tensor_logits->GetDataType(); // 获取数据类型
+        int dtype_size_logits = ge::GetSizeByDataType(dtype_logits); // 获取数据类型的字长
+        uint32_t length_logits = tensor_logits->GetShapeSize(); // 获取元素个数
+        uint32_t size_logits = tensor_logits->GetSize(); // 获取内存大小
         // 示例: 获取算子输入属性
         const gert::RuntimeAttrs *attrs = context->GetAttrs();
-        const int64_t *attr_top_k = attrs->GetInt(0);
-        const int64_t *attr_num_iters = attrs->GetInt(1);
+        const int64_t *attr_iterations = attrs->GetInt(0);
+        const float *attr_eps = attrs->GetFloat(1);
         // 示例: 配置tiling key, 从而实现kernel侧不同数据类型/算法的区分
-        uint32_t DT_SCORE = static_cast<uint32_t>(dtype_score);
-        ASCENDC_TPL_SEL_PARAM(context, DT_SCORE);
+        uint32_t DT_LOGITS = static_cast<uint32_t>(dtype_logits);
+        ASCENDC_TPL_SEL_PARAM(context, DT_LOGITS);
         // 示例: 计算tiling方案并填充tiling结构体
         MhcSinkhornTilingData *tiling = context->GetTilingData<MhcSinkhornTilingData>();
-        tiling->length = length_score;
+        tiling->length = length_logits;
         // 配置启动核数
         context->SetBlockDim(num_cores_aiv);
         // 配置workspace大小
@@ -50,20 +54,20 @@ namespace ops {
     class MhcSinkhorn : public OpDef {
     public:
         explicit MhcSinkhorn(const char *name) : OpDef(name) {
-            this->Input("score")
+            this->Input("logits")
                 .ParamType(REQUIRED)
                 .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
                 .Format({ge::FORMAT_ND, ge::FORMAT_ND});
-            this->Output("top_score")
+            this->Input("mask")
+                .ParamType(OPTIONAL)
+                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            this->Output("weights")
                 .ParamType(REQUIRED)
                 .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
                 .Format({ge::FORMAT_ND, ge::FORMAT_ND});
-            this->Output("top_idx")
-                .ParamType(REQUIRED)
-                .DataType({ge::DT_INT32, ge::DT_INT64})
-                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
-            this->Attr("top_k").AttrType(REQUIRED).Int();
-            this->Attr("num_iters").AttrType(REQUIRED).Int();
+            this->Attr("iterations").AttrType(OPTIONAL).Int(20);
+            this->Attr("eps").AttrType(OPTIONAL).Float(1e-06);
             this->SetInferShape(ge::InferShape).SetInferDataType(ge::InferDataType);
             this->AICore()
                 .SetTiling(optiling::TilingFunc)
@@ -72,4 +76,3 @@ namespace ops {
     };
     OP_ADD(MhcSinkhorn);
 }  // namespace ops
-

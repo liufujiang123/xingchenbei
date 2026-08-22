@@ -3,6 +3,6 @@
 
 #include <cstdint>
 
-struct DsaSfaTilingData {
+struct SparseFlashAttentionTilingData {
     uint32_t length;
 };
