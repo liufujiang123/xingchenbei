@@ -1,6 +1,6 @@
 ---
 name: xingchen-kernel-optimizer
-description: Contract-first Ascend C competition operator development and evidence-driven optimization with sparse research-derived design/performance guidance.
+description: Contract-first Ascend C competition operator development and evidence-driven optimization with research-derived design/performance guidance selected on demand.
 ---
 
 # Xingchen Kernel Optimizer
@@ -53,34 +53,63 @@ Allowed archetypes: `elementwise`, `broadcast`, `reduction`, `scan`, `recurrent`
 
 Declared archetypes are hints, not contract facts. Static suggestions are weaker still. Never infer semantics from filenames, identifiers, or another project's conventions.
 
-## Sparse knowledge injection
+## Experience discovery works like skill discovery
 
-The design library is intentionally broader than the context shown to Codex.
+The design knowledge base may be broad, but Codex must not receive every pattern in full detail.
 
-Normal `design` output must obey this attention budget:
+Instead:
 
-- inject at most **3 active design patterns**;
-- prefer current archetype/source/document signals over generic checklist items;
-- keep the active set phase-diverse where practical;
-- allow at most **1 risk-triggered deep dive** with validation detail;
-- keep other relevant patterns as **ids only**;
-- do not treat deferred ids as obligations.
+1. expose the **complete experience catalog** as short summaries;
+2. let Codex read all summaries and perform the semantic relevance match itself;
+3. treat `machine_suggestions` only as weak navigation hints;
+4. let Codex select at most **3** experience ids relevant to the current design question;
+5. load full `decide / guardrails / validate` text only for those selected ids.
 
-The purpose is to ask the highest-value questions at the right time, not to make Codex execute every rule.
+This is intentionally similar to choosing a Skill from its name/description before reading the full Skill.
 
-If a concrete risk or unknown needs more detail, expand one pattern explicitly:
+The normal `design` record contains:
+
+```text
+design.experience_catalog     # every pattern, summary only
+design.machine_suggestions    # weak source/archetype hints
+design.selected_decisions     # empty unless Codex explicitly selected patterns
+```
+
+Codex must inspect **all** entries in `experience_catalog` before deciding that a pattern is irrelevant. It may select a pattern that is absent from `machine_suggestions`.
+
+For a terminal view of the whole summary catalog:
+
+```bash
+python3 tools/ascend_design_analyze.py --task <task>
+```
+
+After Codex chooses relevant experience ids:
 
 ```bash
 python3 tools/ascend_design_analyze.py \
   --task <task> \
-  --expand-pattern <pattern-id>
+  --select-pattern <pattern-id> \
+  --select-pattern <pattern-id>
 ```
 
-Do not expand the whole catalog. A pattern is advisory and Codex may reject it with a reason tied to contract, target API, resource budget, build/correctness evidence, or measured behavior.
+Select only the patterns needed for the current question. Do not expand the whole catalog merely to be safe.
+
+A selected pattern is advisory. Codex may reject it with a reason tied to the authoritative contract, target API, resource budget, build/correctness evidence, or measured behavior.
+
+## What belongs in a catalog summary
+
+A summary should be enough for semantic routing but not enough to prescribe the answer. It includes:
+
+- pattern id;
+- design phase;
+- broad applicability;
+- one short description of the decision/problem the experience addresses.
+
+It does not include full implementation guidance, validation detail, fixed tile sizes, core counts, stage counts, ring depths, TilingKey thresholds, or copied reference-project parameters.
 
 ## Design decisions Codex must eventually resolve
 
-The complete design should cover these topics in `tasks/<task>/design.md`, but they do **not** all need to be injected in one prompt:
+The retained `tasks/<task>/design.md` should eventually cover these topics, but the Harness does not inject all of them as simultaneous prompts:
 
 - immutable contract and legal dtype/shape/mode/optional domain;
 - mathematical stage/dependency graph;
@@ -93,24 +122,27 @@ The complete design should cover these topics in `tasks/<task>/design.md`, but t
 - storage/compute/accumulator/output precision semantics;
 - correctness matrix from semantic and hardware boundaries.
 
-## High-value architecture prompts
+## High-value architecture questions
 
-Apply only when the contract/source supports them:
+The experience catalog includes reusable lessons for:
 
-- **elementwise/broadcast** — choose independent tile axis and broadcast staging; establish a simple GM→UB→V→GM correctness path before deeper pipelining.
-- **reduction/normalization** — define reduction ownership, merge cost, accumulator semantics and baseline full-data pass count.
-- **scan/recurrent** — keep carried state with its dependency chain when practical; parallelize orthogonal axes.
-- **sparse/gather/paged** — define index/page/chunk semantics and output order before locality/coalescing decisions.
-- **Cube/matmul** — choose M/N/K ownership and resident-versus-streaming operand roles under L1/L0 constraints.
-- **mixed Cube+Vector** — define producer, consumer, intermediate location, true-ready edge, reuse edge and safe in-flight distance before flags/rings/stage counts.
+- **elementwise/broadcast** — independent tile axes, broadcast staging and a simple GM→UB→V→GM baseline;
+- **reduction/normalization** — ownership, merge cost, accumulator semantics and full-data pass count;
+- **scan/recurrent** — carried-state locality and orthogonal parallelism;
+- **sparse/gather/paged** — index/page/chunk semantics before locality/coalescing;
+- **Cube/matmul** — M/N/K ownership and resident-versus-streaming operand roles;
+- **mixed Cube+Vector** — producer/consumer, ready/reuse edges and safe in-flight distance before flags/rings/stages;
+- **layout/tiling/memory/precision/platform/validation** — generic decisions that apply across operator families.
 
 Do not copy fixed tiles, stage counts, ring depths, synchronization intervals, transfer thresholds or AIC:AIV ratios from reference projects.
 
 ## Codex autonomy
 
-The Harness must not choose exact mathematical reformulations, tile sizes, core counts, queue depths, ring depths, UB/L1/L0 layouts, TilingKey counts/thresholds, or specializations. Codex owns those choices and must justify them from the current operator and target.
+The Harness supplies a map of proven questions and failure modes. Codex owns the concrete solution.
 
-The design layer succeeds when it exposes a high-value missing decision early; it is not intended to make every operator structurally identical.
+The Harness must not choose exact mathematical reformulations, tile sizes, core counts, queue depths, ring depths, UB/L1/L0 layouts, TilingKey counts/thresholds, or specializations.
+
+Codex should use the catalog to notice relevant experience, then decide from the current operator, target CANN/SOC, official APIs and evidence.
 
 ## Baseline completion gate
 
