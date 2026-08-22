@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Conservative, attention-budgeted Ascend operator design analyzer.
+"""Ascend operator-development experience catalog and advisory matcher.
 
-The knowledge base may be broad, but only a tiny active subset is injected into
-Codex context. Static source/document signals are advisory and never become
-contract facts. Concrete algorithms, tile sizes, core counts, queue depths and
-specialization thresholds remain Codex decisions.
+The full experience catalog is exposed as compact summaries so Codex can do its
+own semantic matching, similar to selecting a skill from descriptions. Machine
+matching is only a weak hint. Detailed pattern text is loaded only after Codex
+explicitly selects a small number of pattern ids.
 """
 from __future__ import annotations
 
@@ -21,14 +21,9 @@ TEXT_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp", ".py", ".md", ".json"
 IGNORE_PARTS = {".git", ".agent-deps", "build", "output", "dist", "runs", "profiles", "__pycache__", "generated"}
 MAX_FILE_BYTES = 768 * 1024
 MAX_TOTAL_BYTES = 6 * 1024 * 1024
-MAX_ACTIVE_PATTERNS = 3
-MAX_DEEP_DIVES = 1
-MAX_DEFERRED_IDS = 8
-RISK_SIGNAL_TAGS = {
-    "mode", "optional", "rank_dispatch", "host_materialize", "pad", "reduction",
-    "scan", "recurrent", "state", "workspace", "sparse", "gather", "paged",
-    "index", "cross_core", "mixed_cv",
-}
+MAX_SELECTED_PATTERNS = 3
+MAX_MACHINE_SUGGESTIONS = 5
+MAX_SUMMARY_CHARS = 180
 
 SIGNAL_RULES = {
     "mode": [r"\bTilingKey\b", r"\btiling[_ ]?key\b", r"\bbackward\b", r"\bforward\b"],
@@ -65,16 +60,31 @@ SIGNAL_RULES = {
 }
 
 ARCHETYPE_FROM_TAGS = {
-    "broadcast": {"broadcast"}, "reduction": {"reduction"}, "scan": {"scan"},
-    "recurrent": {"recurrent"}, "sparse": {"sparse", "paged"}, "gather": {"gather"},
-    "matmul": {"cube"}, "normalization": {"softmax", "normalization"},
-    "attention": {"attention"}, "elementwise": {"elementwise"}, "composite": {"cross_core"},
+    "broadcast": {"broadcast"},
+    "reduction": {"reduction"},
+    "scan": {"scan"},
+    "recurrent": {"recurrent"},
+    "sparse": {"sparse", "paged"},
+    "gather": {"gather"},
+    "matmul": {"cube"},
+    "normalization": {"softmax", "normalization"},
+    "attention": {"attention"},
+    "elementwise": {"elementwise"},
+    "composite": {"cross_core"},
 }
 
 PHASE_ORDER = {
-    "contract": 0, "semantics": 1, "parallelism": 2, "layout": 3, "tiling": 4,
-    "memory": 5, "precision": 6, "architecture": 7, "implementation": 8,
-    "platform": 9, "validation": 10,
+    "contract": 0,
+    "semantics": 1,
+    "parallelism": 2,
+    "layout": 3,
+    "tiling": 4,
+    "memory": 5,
+    "precision": 6,
+    "architecture": 7,
+    "implementation": 8,
+    "platform": 9,
+    "validation": 10,
 }
 
 
@@ -137,6 +147,7 @@ def scan_sources(paths):
     interface_evidence = []
     host_sources = 0
     kernel_sources = 0
+
     for path in iter_text_files(paths):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -151,12 +162,16 @@ def scan_sources(paths):
             host_sources += 1
         if "op_kernel" in parts:
             kernel_sources += 1
+
         for regex in (r"\bOpDef\b", r"\.Input\s*\(", r"\.Output\s*\(", r"\.Attr\s*\("):
             match = re.search(regex, text)
             if match:
-                interface_evidence.append({"file": rel, "line": text.count("\n", 0, match.start()) + 1, "kind": regex})
+                interface_evidence.append(
+                    {"file": rel, "line": text.count("\n", 0, match.start()) + 1, "kind": regex}
+                )
                 if len(interface_evidence) >= 8:
                     break
+
         for tag, regexes in SIGNAL_RULES.items():
             if tag in signals and len(signals[tag]) >= 3:
                 continue
@@ -164,12 +179,19 @@ def scan_sources(paths):
             if hit:
                 line, snippet = hit
                 signals.setdefault(tag, []).append({"file": rel, "line": line, "snippet": snippet})
+
     if "cube" in signals and "vector" in signals:
-        signals.setdefault("mixed_cv", []).append({"file": "<derived>", "line": 0, "snippet": "both Cube/AIC and Vector/AIV source signals are present"})
+        signals.setdefault("mixed_cv", []).append(
+            {"file": "<derived>", "line": 0, "snippet": "both Cube/AIC and Vector/AIV source signals are present"}
+        )
+
     return {
-        "files_scanned": len(files), "task_contract_files": task_contract_files,
-        "host_source_count": host_sources, "kernel_source_count": kernel_sources,
-        "public_interface_evidence": interface_evidence[:8], "signals": signals,
+        "files_scanned": len(files),
+        "task_contract_files": task_contract_files,
+        "host_source_count": host_sources,
+        "kernel_source_count": kernel_sources,
+        "public_interface_evidence": interface_evidence[:8],
+        "signals": signals,
     }
 
 
@@ -193,6 +215,33 @@ def suggest_archetypes(signal_tags):
     return [name for name, required in ARCHETYPE_FROM_TAGS.items() if tags & required]
 
 
+def normalize_text(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def shorten(value, limit=MAX_SUMMARY_CHARS):
+    text = normalize_text(value)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def catalog_entry(pattern):
+    return {
+        "id": pattern["id"],
+        "phase": pattern.get("phase"),
+        "tier": pattern.get("tier"),
+        "applies_to": pattern.get("applies_to", []),
+        "summary": shorten(pattern.get("decide") or pattern.get("title")),
+    }
+
+
+def build_catalog(registry):
+    indexed = list(enumerate(registry["patterns"]))
+    indexed.sort(key=lambda item: (PHASE_ORDER.get(item[1].get("phase"), 99), item[0]))
+    return [catalog_entry(pattern) for _, pattern in indexed]
+
+
 def rank_patterns(registry, declared, suggested, signal_tags):
     tags = set(signal_tags)
     ranked = []
@@ -203,15 +252,22 @@ def rank_patterns(registry, declared, suggested, signal_tags):
         declared_match = set(declared) & applies
         suggested_match = set(suggested) & applies
         matched_tags = tags & when_tags
+
         if declared_match and matched_tags:
             relevance = 90 + 5 * len(matched_tags)
-            reasons = ["declared_archetype:" + ",".join(sorted(declared_match)), "signal:" + ",".join(sorted(matched_tags))]
+            reasons = [
+                "declared_archetype:" + ",".join(sorted(declared_match)),
+                "signal:" + ",".join(sorted(matched_tags)),
+            ]
         elif declared_match:
             relevance = 80
             reasons = ["declared_archetype:" + ",".join(sorted(declared_match))]
         elif suggested_match and matched_tags:
             relevance = 75 + 5 * len(matched_tags)
-            reasons = ["static_archetype:" + ",".join(sorted(suggested_match)), "signal:" + ",".join(sorted(matched_tags))]
+            reasons = [
+                "static_archetype:" + ",".join(sorted(suggested_match)),
+                "signal:" + ",".join(sorted(matched_tags)),
+            ]
         elif "all" in applies and matched_tags:
             relevance = 70 + 5 * len(matched_tags)
             reasons = ["signal:" + ",".join(sorted(matched_tags))]
@@ -223,82 +279,96 @@ def rank_patterns(registry, declared, suggested, signal_tags):
             reasons = ["general"]
         else:
             continue
-        ranked.append({**pattern, "relevance": relevance, "reasons": reasons, "matched_signal_tags": sorted(matched_tags), "_order": order})
-    ranked.sort(key=lambda item: (-item["relevance"], PHASE_ORDER.get(item.get("phase"), 99), item["_order"]))
+
+        ranked.append(
+            {
+                **pattern,
+                "relevance": relevance,
+                "reasons": reasons,
+                "matched_signal_tags": sorted(matched_tags),
+                "_order": order,
+            }
+        )
+
+    ranked.sort(
+        key=lambda item: (
+            -item["relevance"],
+            PHASE_ORDER.get(item.get("phase"), 99),
+            item["_order"],
+        )
+    )
     return ranked
 
 
-def choose_active(ranked, limit):
-    limit = min(max(int(limit), 0), MAX_ACTIVE_PATTERNS)
-    active = []
-    selected_ids = set()
-    used_phases = set()
-    for item in ranked:
-        phase = item.get("phase")
-        if phase in used_phases:
-            continue
-        active.append(item)
-        selected_ids.add(item["id"])
-        used_phases.add(phase)
-        if len(active) >= limit:
-            return active
-    for item in ranked:
-        if item["id"] in selected_ids:
-            continue
-        active.append(item)
-        if len(active) >= limit:
-            break
-    return active
+def machine_suggestions(ranked):
+    return [
+        {
+            "id": item["id"],
+            "relevance": item["relevance"],
+            "reasons": item.get("reasons", []),
+        }
+        for item in ranked[:MAX_MACHINE_SUGGESTIONS]
+    ]
 
 
-def compact_pattern(item, deep=False):
-    out = {
-        "id": item["id"], "title": item["title"], "phase": item.get("phase"),
-        "tier": item.get("tier"), "relevance": item.get("relevance"),
-        "reasons": item.get("reasons", []), "detail_level": "deep_dive" if deep else "prompt",
-        "decide": item["decide"], "guardrails": item["guardrails"],
-    }
-    if deep:
-        out["validate"] = item["validate"]
-        out["deep_dive_trigger"] = item.get("matched_signal_tags", [])
+def normalize_pattern_ids(values):
+    out = []
+    for value in values or []:
+        for item in re.split(r"[\s,;]+", value.strip()):
+            if item and item not in out:
+                out.append(item)
     return out
 
 
-def resolve_expansions(ranked, registry, expand_ids):
-    requested = []
-    for value in expand_ids or []:
-        for item in re.split(r"[\s,;]+", value.strip()):
-            if item and item not in requested:
-                requested.append(item)
-    if not requested:
-        return []
-    by_id = {item["id"]: item for item in ranked}
-    registry_by_id = {item["id"]: item for item in registry["patterns"]}
-    unknown = [item for item in requested if item not in registry_by_id]
+def full_pattern(pattern, selection_reason="codex_selected"):
+    return {
+        "id": pattern["id"],
+        "title": pattern.get("title"),
+        "phase": pattern.get("phase"),
+        "tier": pattern.get("tier"),
+        "applies_to": pattern.get("applies_to", []),
+        "selected_by": selection_reason,
+        "decide": pattern.get("decide"),
+        "guardrails": pattern.get("guardrails"),
+        "validate": pattern.get("validate"),
+    }
+
+
+def resolve_selections(registry, selected_ids):
+    requested = normalize_pattern_ids(selected_ids)
+    if len(requested) > MAX_SELECTED_PATTERNS:
+        raise ValueError(
+            "select at most %d design patterns at once; choose from catalog summaries first"
+            % MAX_SELECTED_PATTERNS
+        )
+    by_id = {item["id"]: item for item in registry["patterns"]}
+    unknown = [item for item in requested if item not in by_id]
     if unknown:
         raise ValueError("unknown design pattern(s): %s" % ",".join(unknown))
-    expanded = []
-    for pattern_id in requested:
-        item = by_id.get(pattern_id)
-        if item is None:
-            item = {**registry_by_id[pattern_id], "relevance": 0, "reasons": ["explicit_expand"], "matched_signal_tags": []}
-        expanded.append(compact_pattern(item, deep=True))
-    return expanded
+    return [full_pattern(by_id[pattern_id]) for pattern_id in requested]
 
 
-def analyze(paths, archetypes=None, limit=MAX_ACTIVE_PATTERNS, registry_path=REGISTRY, expand_ids=None, deep_dive_limit=MAX_DEEP_DIVES):
+def analyze(
+    paths,
+    archetypes=None,
+    limit=MAX_MACHINE_SUGGESTIONS,
+    registry_path=REGISTRY,
+    expand_ids=None,
+    select_ids=None,
+    deep_dive_limit=0,
+):
+    del deep_dive_limit
     registry = load_registry(registry_path)
     declared = normalize_archetypes(archetypes or [], registry)
     scan = scan_sources(paths)
     signal_tags = sorted(scan["signals"])
     suggested = suggest_archetypes(signal_tags)
     ranked = rank_patterns(registry, declared, suggested, signal_tags)
-    active_raw = choose_active(ranked, limit)
-    risk_candidates = [item for item in active_raw if set(item.get("matched_signal_tags", [])) & RISK_SIGNAL_TAGS]
-    deep_ids = {item["id"] for item in risk_candidates[:max(0, min(int(deep_dive_limit), MAX_DEEP_DIVES))]}
-    active = [compact_pattern(item, deep=item["id"] in deep_ids) for item in active_raw]
-    active_ids = {item["id"] for item in active_raw}
-    deferred = [item["id"] for item in ranked if item["id"] not in active_ids][:MAX_DEFERRED_IDS]
+
+    combined_selection = list(select_ids or []) + list(expand_ids or [])
+    selected = resolve_selections(registry, combined_selection)
+    catalog = build_catalog(registry)
+
     unknowns = []
     if not scan["task_contract_files"]:
         unknowns.append("task_contract_not_found_in_scanned_paths")
@@ -308,24 +378,46 @@ def analyze(paths, archetypes=None, limit=MAX_ACTIVE_PATTERNS, registry_path=REG
         unknowns.append("operator_archetype_not_declared; Codex must resolve it from the contract")
     if not scan["kernel_source_count"]:
         unknowns.append("kernel_source_not_detected; implementation may not exist yet")
+
+    hint_limit = min(max(int(limit), 0), MAX_MACHINE_SUGGESTIONS)
+    hints = machine_suggestions(ranked)[:hint_limit]
+    selected_ids_set = {x["id"] for x in selected}
+
     return {
-        "kind": "ascend_operator_design", "status": "advisory",
-        "declared_archetypes": declared, "suggested_archetypes": suggested,
-        "archetype_rule": "declared archetypes are hints; static suggestions are not contract facts and may be overridden after reading the task statement",
+        "kind": "ascend_operator_design",
+        "status": "advisory",
+        "declared_archetypes": declared,
+        "suggested_archetypes": suggested,
+        "archetype_rule": (
+            "declared archetypes are hints; static suggestions are not contract facts and may be overridden after reading the task statement"
+        ),
         "contract_evidence": {
             "task_contract_files": scan["task_contract_files"],
             "public_interface_evidence": scan["public_interface_evidence"],
-            "host_source_count": scan["host_source_count"], "kernel_source_count": scan["kernel_source_count"],
+            "host_source_count": scan["host_source_count"],
+            "kernel_source_count": scan["kernel_source_count"],
         },
-        "static_signals": scan["signals"], "files_scanned": scan["files_scanned"], "unknowns": unknowns,
+        "static_signals": scan["signals"],
+        "files_scanned": scan["files_scanned"],
+        "unknowns": unknowns,
+        "experience_catalog": catalog,
+        "machine_suggestions": hints,
+        "selected_decisions": selected,
+        "decisions": selected,
+        "expanded_decisions": selected,
+        "deferred_decision_ids": [item["id"] for item in catalog if item["id"] not in selected_ids_set],
         "attention_budget": {
-            "active_limit": min(max(int(limit), 0), MAX_ACTIVE_PATTERNS),
-            "deep_dive_limit": min(max(int(deep_dive_limit), 0), MAX_DEEP_DIVES),
-            "policy": "top-k dynamic retrieval; one risk-triggered deep dive; deferred patterns remain ids only",
+            "catalog_entries": len(catalog),
+            "catalog_detail": "summary_only",
+            "selected_detail_limit": MAX_SELECTED_PATTERNS,
+            "machine_suggestion_limit": hint_limit,
+            "policy": "all summaries visible; Codex selects details; machine suggestions are advisory only",
         },
-        "decisions": active, "deferred_decision_ids": deferred,
-        "expanded_decisions": resolve_expansions(ranked, registry, expand_ids),
-        "rule": "Only the small active set should enter normal Codex context. Use deferred ids as navigation, not checklist obligations. Expand one pattern only when a concrete risk/unknown requires it. Codex owns the concrete algorithm, task mapping, tiling, buffer sizes and specialization choices; authoritative contract/build/correctness evidence overrides all heuristics.",
+        "rule": (
+            "Codex must inspect the complete experience_catalog summaries and choose relevant pattern ids itself, similar to skill selection. "
+            "machine_suggestions are weak navigation hints and must not decide the design. Load full decide/guardrails/validate text only for explicitly selected patterns. "
+            "Authoritative contract/build/correctness evidence overrides every experience pattern."
+        ),
     }
 
 
@@ -337,40 +429,60 @@ def print_report(result):
     print("static_signal_tags=%s" % (",".join(sorted(result["static_signals"])) or "none"))
     print("unknowns=%s" % ("; ".join(result["unknowns"]) or "none"))
     budget = result["attention_budget"]
-    print("attention_budget=active:%d deep:%d" % (budget["active_limit"], budget["deep_dive_limit"]))
-    print()
-    for index, item in enumerate(result["decisions"], 1):
-        print("[%d] %s — %s [%s]" % (index, item["id"], item["title"], item["detail_level"]))
-        print("  decide: %s" % item["decide"])
-        print("  guardrails: %s" % item["guardrails"])
-        if item.get("validate"):
-            print("  validate: %s" % item["validate"])
-            print("  deep_dive_trigger: %s" % (",".join(item.get("deep_dive_trigger", [])) or "explicit"))
-        print("  selected_by: %s" % "; ".join(item.get("reasons", [])))
-        print()
-    if result["deferred_decision_ids"]:
-        print("deferred_ids=%s" % ",".join(result["deferred_decision_ids"]))
-    if result["expanded_decisions"]:
-        print("\nEXPLICIT EXPANSION")
-        for item in result["expanded_decisions"]:
-            print("%s — %s" % (item["id"], item["title"]))
-            print("  decide: %s" % item["decide"])
-            print("  guardrails: %s" % item["guardrails"])
-            print("  validate: %s" % item["validate"])
-    print("rule=%s" % result["rule"])
+    print(
+        "experience_catalog=%d summaries; selected_detail_limit=%d"
+        % (budget["catalog_entries"], budget["selected_detail_limit"])
+    )
+
+    print("\n===== EXPERIENCE CATALOG: READ ALL SUMMARIES, THEN CHOOSE =====")
+    for item in result["experience_catalog"]:
+        scope = ",".join(item.get("applies_to", [])) or "all"
+        print("[%s] %s | %s | applies=%s" % (item.get("phase") or "other", item["id"], item["summary"], scope))
+
+    if result["machine_suggestions"]:
+        print("\n===== MACHINE HINTS: ADVISORY ONLY =====")
+        for item in result["machine_suggestions"]:
+            print("%s | %s" % (item["id"], "; ".join(item.get("reasons", []))))
+
+    if result["selected_decisions"]:
+        print("\n===== CODEX-SELECTED EXPERIENCE DETAILS =====")
+        for item in result["selected_decisions"]:
+            print("%s — %s" % (item["id"], item.get("title") or ""))
+            print("  decide: %s" % item.get("decide"))
+            print("  guardrails: %s" % item.get("guardrails"))
+            print("  validate: %s" % item.get("validate"))
+
+    print("\nrule=%s" % result["rule"])
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ascend operator-development design analyzer")
+    parser = argparse.ArgumentParser(description="Ascend operator-development experience catalog and matcher")
     parser.add_argument("--task")
     parser.add_argument("--task-dir")
     parser.add_argument("--workspace")
     parser.add_argument("--source-dir", action="append", default=[])
     parser.add_argument("--archetype", action="append", default=[])
-    parser.add_argument("--limit", type=int, default=MAX_ACTIVE_PATTERNS, help="active prompt count; hard-capped at %d" % MAX_ACTIVE_PATTERNS)
-    parser.add_argument("--expand-pattern", action="append", default=[], help="explicitly expand one design pattern by id; may be repeated")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=MAX_MACHINE_SUGGESTIONS,
+        help="number of advisory machine hints; all experience summaries remain visible",
+    )
+    parser.add_argument(
+        "--select-pattern",
+        action="append",
+        default=[],
+        help="Codex-selected experience id to load in detail; may be repeated up to %d times" % MAX_SELECTED_PATTERNS,
+    )
+    parser.add_argument(
+        "--expand-pattern",
+        action="append",
+        default=[],
+        help="compatibility alias for --select-pattern",
+    )
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args()
+
     paths = []
     if args.source_dir:
         paths.extend(pathlib.Path(x).expanduser() for x in args.source_dir)
@@ -385,11 +497,20 @@ def main():
             workspace = ROOT / "tasks" / args.task / "workspace"
             if workspace.exists():
                 paths.append(workspace)
+
     if not paths:
         raise SystemExit("provide --task, --task-dir/--workspace, or --source-dir")
+
     resolved = [p if p.is_absolute() else ROOT / p for p in paths]
-    result = analyze(resolved, archetypes=args.archetype, limit=args.limit, expand_ids=args.expand_pattern)
+    selected = list(args.select_pattern) + list(args.expand_pattern)
+    result = analyze(
+        resolved,
+        archetypes=args.archetype,
+        limit=args.limit,
+        select_ids=selected,
+    )
     result["source_dirs"] = [display_path(p) for p in resolved]
+
     if args.as_json:
         json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
