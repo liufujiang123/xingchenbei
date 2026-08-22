@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "description": "Ascend-first optimization patterns used by the competition harness. Patterns are hypotheses, never automatic correctness-preserving rewrites.",
+  "common": [
+    {
+      "id": "common.multicore_balance",
+      "title": "Balance logical work across physical cores",
+      "bottlenecks": ["latency", "underutilization", "pipeline"],
+      "signals": ["usedCoreNum is far below available cores", "large per-core serial loop", "small-S/large-D or large-S/small-D imbalance"],
+      "actions": ["make tile size shape-aware", "increase independent logical tasks", "use contiguous quotient/remainder partitioning", "avoid oversharding tiny work"],
+      "risks": ["more tails", "extra launch/control overhead", "worse locality"]
+    },
+    {
+      "id": "common.remove_scalar_overhead",
+      "title": "Reduce scalar/control work in hot loops",
+      "bottlenecks": ["latency", "scalar"],
+      "signals": ["division/modulo inside every tile", "repeated invariant address math", "runtime branches on compile-time-small attributes"],
+      "actions": ["hoist invariants", "replace repeated quotient/remainder with incremental indices", "use tiling keys or specialization only for common stable modes"],
+      "risks": ["code size growth", "tail bugs", "over-specialization"]
+    },
+    {
+      "id": "common.memory_locality",
+      "title": "Improve memory locality and on-chip reuse",
+      "bottlenecks": ["memory", "bandwidth", "pipeline"],
+      "signals": ["same GM data loaded repeatedly", "large intermediates round-trip through GM", "poor contiguous access"],
+      "actions": ["reuse UB/L1 data when legal", "coalesce contiguous transfers", "avoid materializing intermediates", "align transfer granularity where practical"],
+      "risks": ["UB/L1 pressure", "reduced occupancy", "more complicated tails"]
+    }
+  ],
+  "operator_classes": {
+    "vector": {
+      "resource_model": ["S", "MTE2", "V", "MTE3", "UB"],
+      "canonical_flow": "GM -> UB -> Vector -> UB -> GM",
+      "patterns": [
+        {
+          "id": "vector.mte_v_overlap",
+          "title": "Overlap CopyIn/CopyOut with Vector compute",
+          "bottlenecks": ["pipeline", "memory", "bandwidth"],
+          "signals": ["MTE and V have visible idle gaps", "CopyIn -> Compute -> CopyOut is effectively serial", "multiple independent tiles exist"],
+          "actions": ["use TPipe/TQue producer-consumer structure", "use ping-pong buffers", "increase queue depth to 2 when UB allows", "schedule next CopyIn while current tile computes and previous tile copies out"],
+          "risks": ["UB capacity", "queue lifetime mistakes", "tail synchronization", "small tensors may regress"]
+        },
+        {
+          "id": "vector.aligned_copy_fastpath",
+          "title": "Use aligned DataCopy fast paths",
+          "bottlenecks": ["memory", "bandwidth", "latency"],
+          "signals": ["all tiles use padding copy APIs", "many full aligned tiles", "tail path dominates code structure"],
+          "actions": ["use normal DataCopy for aligned full tiles", "reserve DataCopyPad for actual tails/non-aligned regions"],
+          "risks": ["alignment assumptions", "boundary regressions"]
+        },
+        {
+          "id": "vector.ub_reuse",
+          "title": "Reuse UB operands and accumulators",
+          "bottlenecks": ["memory", "bandwidth", "compute"],
+          "signals": ["operand copied more than once per logical tile", "temporary tensor can remain resident", "serial reduction reloads data unnecessarily"],
+          "actions": ["keep reusable source/accumulator in UB", "initialize accumulators from the first real operand when numerically legal", "avoid redundant Duplicate/zero-add sequences"],
+          "risks": ["floating-point semantic changes", "signed-zero/rounding changes", "UB pressure"]
+        },
+        {
+          "id": "vector.reduction_schedule",
+          "title": "Optimize reduction schedule without losing precision contract",
+          "bottlenecks": ["compute", "pipeline"],
+          "signals": ["long dependent Add chain", "small fixed reduction factor", "FP32 accumulation required"],
+          "actions": ["specialize common small reduction factors", "consider pairwise/tree reduction only if tolerance permits", "keep generic fallback"],
+          "risks": ["rounding-order changes", "bitwise differences", "code size"]
+        }
+      ]
+    },
+    "cube": {
+      "resource_model": ["S", "MTE2", "MTE1", "M", "FIX", "MTE3", "L1", "L0A", "L0B", "L0C"],
+      "canonical_flow": "GM -> L1 -> L0A/L0B -> Cube -> L0C -> FixPipe -> GM/L1",
+      "patterns": [
+        {
+          "id": "cube.tile_utilization",
+          "title": "Choose Cube-friendly tile shapes",
+          "bottlenecks": ["compute", "underutilization"],
+          "signals": ["poor matrix instruction utilization", "many tiny or ragged M/N/K tiles", "excessive K-loop overhead"],
+          "actions": ["prefer hardware-friendly M/N/K granularity", "increase L1/L0 reuse", "balance tile reuse against parallelism"],
+          "risks": ["larger tails", "L1/L0 capacity", "fewer parallel blocks"]
+        },
+        {
+          "id": "cube.mte_m_overlap",
+          "title": "Pipeline matrix data movement with Cube compute",
+          "bottlenecks": ["pipeline", "memory", "compute"],
+          "signals": ["Cube waits for MTE1/MTE2", "multiple independent K/M/N tiles", "L1/L0 buffers serialize stages"],
+          "actions": ["ping-pong L1/L0 staging where API permits", "prefetch next tile while current Cube instruction runs", "remove unnecessary barriers"],
+          "risks": ["L1/L0 pressure", "event/synchronization errors", "extra buffer cost"]
+        }
+      ]
+    },
+    "mixed_cv": {
+      "resource_model": ["AIC/Cube", "AIV/Vector", "MTE", "workspace", "L1", "UB", "event sync"],
+      "canonical_flow": "Cube and Vector stages exchange tiles/workspace while independent stages overlap",
+      "patterns": [
+        {
+          "id": "mixed_cv.cv_overlap",
+          "title": "Run Cube and Vector as an overlapped producer-consumer pipeline",
+          "bottlenecks": ["pipeline", "compute", "latency"],
+          "signals": ["Cube waits for Vector or Vector waits for Cube", "sequential C-then-V schedule", "producer and consumer operate on different tiles"],
+          "actions": ["pipeline C(tile n+1) with V(tile n)", "use event synchronization only on true data dependencies", "separate workspace slots so producer does not wait for consumer to release the same buffer"],
+          "risks": ["workspace growth", "dependency races", "cross-core synchronization complexity"]
+        },
+        {
+          "id": "mixed_cv.workspace_ring",
+          "title": "Increase workspace ring depth to remove false C/V dependencies",
+          "bottlenecks": ["pipeline", "latency"],
+          "signals": ["both Cube and Vector have gaps despite similar stage time", "two-slot workspace causes producer reuse waits"],
+          "actions": ["evaluate 2-slot versus deeper ring such as 4 slots", "measure gap reduction rather than assuming more buffers help"],
+          "risks": ["workspace memory", "indexing complexity", "small workloads may not benefit"]
+        },
+        {
+          "id": "mixed_cv.core_ratio",
+          "title": "Tune AIC/AIV work ratio for asymmetric Cube/Vector load",
+          "bottlenecks": ["compute", "underutilization", "pipeline"],
+          "signals": ["Vector-bound mixed operator", "Cube has idle capacity while Vector queues", "AIC/AIV stage times are strongly asymmetric"],
+          "actions": ["evaluate supported AIC:AIV launch/work ratios", "rebalance partitioning based on measured stage time"],
+          "risks": ["SOC-specific behavior", "unsupported launch topology", "regression on other shapes"]
+        },
+        {
+          "id": "mixed_cv.internal_fusion",
+          "title": "Fuse post-processing without materializing intermediates",
+          "bottlenecks": ["memory", "bandwidth", "pipeline"],
+          "signals": ["Cube result is written to GM then immediately read by Vector", "workspace traffic dominates", "post-op is tile-local"],
+          "actions": ["keep intermediate on-chip or in workspace closest to consumer when legal", "combine compatible tile-local post-processing", "preserve public operator contract"],
+          "risks": ["on-chip memory pressure", "precision/order changes", "more synchronization"]
+        }
+      ]
+    }
+  }
+}
