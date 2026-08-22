@@ -1,27 +1,29 @@
 ---
 name: xingchen-kernel-optimizer
-description: Evidence-driven Ascend C competition operator development and optimization with contract-first design, source/profile diagnosis and research-derived architecture, memory, scheduling, synchronization and hardware-path reasoning.
+description: Contract-first Ascend C competition operator development and evidence-driven optimization with sparse research-derived design/performance guidance.
 ---
 
 # Xingchen Kernel Optimizer
 
-Use this skill to coordinate a competition operator from contract/design through correctness baseline and performance optimization. Correctness and the public interface remain higher priority than performance.
+Coordinate an operator from contract/design through correctness baseline and performance optimization. Correctness and the platform-visible interface are always higher priority than performance.
 
 ## Sources of truth
 
+Use this order:
+
 1. nearest `AGENTS.md`;
-2. task statement/template and current platform evidence;
+2. task statement/template and current verified platform evidence;
 3. target CANN/SOC build and correctness results;
 4. measured benchmark/profile evidence;
-5. official Ascend skills and this repository's compact design/performance pattern libraries.
+5. official Ascend skills and this repository's design/performance pattern libraries.
 
-Use `cannjudge-submit` only for CANNJudge facts/actions and never submit without explicit user authorization. Never expose credentials.
+Use `cannjudge-submit` only for platform facts/actions. Never submit without explicit user authorization and never expose credentials.
 
 Use the official Ascend skills for architecture/tiling, code generation, compile/debug, precision, performance evaluation and optimization. This skill coordinates them; it does not replace them.
 
 # Part I — Operator development
 
-Use this section for a new operator, a missing baseline, or a major architecture rewrite. For a small bug fix, do not force a full redesign.
+Use for a new operator, missing baseline, or major architecture rewrite. Do not force a full redesign for a small bug fix.
 
 Read:
 
@@ -38,67 +40,87 @@ python3 tools/agent_loop.py design \
   --name initial-design
 ```
 
-If the contract has already been read and the mathematical archetype is clear, Codex may provide explicit hints:
+After reading the contract, Codex may add broad archetype hints:
 
 ```bash
 python3 tools/agent_loop.py design \
   --task <task> \
   --archetype reduction \
-  --archetype broadcast \
   --name initial-design
 ```
 
-Allowed archetypes are intentionally broad: `elementwise`, `broadcast`, `reduction`, `scan`, `recurrent`, `sparse`, `gather`, `matmul`, `normalization`, `attention`, `composite`.
+Allowed archetypes: `elementwise`, `broadcast`, `reduction`, `scan`, `recurrent`, `sparse`, `gather`, `matmul`, `normalization`, `attention`, `composite`.
 
-`declared_archetypes` are Codex/user hints, not a replacement for the task contract. `suggested_archetypes` come from conservative source signals and are even weaker. Never infer semantics from a filename or identifier alone.
+Declared archetypes are hints, not contract facts. Static suggestions are weaker still. Never infer semantics from filenames, identifiers, or another project's conventions.
 
-## Mandatory baseline design decisions
+## Sparse knowledge injection
 
-Before substantial kernel code, resolve and record these decisions in `tasks/<task>/design.md`:
+The design library is intentionally broader than the context shown to Codex.
 
-1. **Contract** — immutable inputs/outputs/attrs/defaults/modes, shape/dtype domain, target CANN/SOC and submission files.
-2. **Semantic graph** — mathematical stages, intermediates, reductions, masks and persistent state.
-3. **Dependency axes** — independent vs reduction-coupled vs recurrence-coupled vs producer-consumer work.
-4. **Task ownership** — what one logical core task owns before micro-tiling.
-5. **Physical layout** — contiguous axes/strides and whether host transforms are views or materializations.
-6. **Host Tiling** — block count, loops, tile regimes, internal mode keys and workspace passed through TilingData.
-7. **Tail/alignment** — full-tile path and partial-tile path.
-8. **Memory lifetime** — register/UB/L1/L0/workspace/GM placement, state vs cross-stage exchange vs scratch.
-9. **Precision** — storage/compute/accumulator/output dtype, reduction order and padding identities.
-10. **Validation matrix** — modes, dtypes, optionals, smallest shapes, alignment boundaries, tails and stress/generalization cases.
+Normal `design` output must obey this attention budget:
 
-These are questions to answer, not fixed implementation templates.
+- inject at most **3 active design patterns**;
+- prefer current archetype/source/document signals over generic checklist items;
+- keep the active set phase-diverse where practical;
+- allow at most **1 risk-triggered deep dive** with validation detail;
+- keep other relevant patterns as **ids only**;
+- do not treat deferred ids as obligations.
 
-## Architecture prompts by operator family
+The purpose is to ask the highest-value questions at the right time, not to make Codex execute every rule.
 
-Apply only when the contract/source supports the family:
+If a concrete risk or unknown needs more detail, expand one pattern explicitly:
 
-- **elementwise/broadcast**: choose independent tile axis and broadcast staging; start with a simple GM->UB->V->GM correctness skeleton.
-- **reduction/normalization**: define reduction ownership and accumulator semantics; count full-data passes and merge cost.
-- **scan/recurrent**: keep carried state with its dependency chain when practical; parallelize orthogonal axes.
-- **sparse/gather/paged**: define index/page/chunk semantics and output order before optimizing staging/locality.
-- **Cube/matmul**: choose M/N/K ownership and resident-vs-streaming operand roles under L1/L0 constraints.
-- **mixed Cube+Vector**: define producer, consumer, intermediate location, true-ready edge, reuse edge and safe in-flight distance before selecting flags/ring depth.
+```bash
+python3 tools/ascend_design_analyze.py \
+  --task <task> \
+  --expand-pattern <pattern-id>
+```
 
-Do not copy fixed tiles, stage counts, ring depths, synchronization intervals or AIC:AIV ratios from reference projects.
+Do not expand the whole catalog. A pattern is advisory and Codex may reject it with a reason tied to contract, target API, resource budget, build/correctness evidence, or measured behavior.
+
+## Design decisions Codex must eventually resolve
+
+The complete design should cover these topics in `tasks/<task>/design.md`, but they do **not** all need to be injected in one prompt:
+
+- immutable contract and legal dtype/shape/mode/optional domain;
+- mathematical stage/dependency graph;
+- dependency axes versus independent axes;
+- logical task/core ownership before micro-tiling;
+- physical layout, strides and host-materialization risks;
+- Host Tiling responsibilities and genuine regime boundaries;
+- aligned full-tile and partial-tail handling;
+- register/UB/L1/L0/workspace/GM lifetime plan;
+- storage/compute/accumulator/output precision semantics;
+- correctness matrix from semantic and hardware boundaries.
+
+## High-value architecture prompts
+
+Apply only when the contract/source supports them:
+
+- **elementwise/broadcast** — choose independent tile axis and broadcast staging; establish a simple GM→UB→V→GM correctness path before deeper pipelining.
+- **reduction/normalization** — define reduction ownership, merge cost, accumulator semantics and baseline full-data pass count.
+- **scan/recurrent** — keep carried state with its dependency chain when practical; parallelize orthogonal axes.
+- **sparse/gather/paged** — define index/page/chunk semantics and output order before locality/coalescing decisions.
+- **Cube/matmul** — choose M/N/K ownership and resident-versus-streaming operand roles under L1/L0 constraints.
+- **mixed Cube+Vector** — define producer, consumer, intermediate location, true-ready edge, reuse edge and safe in-flight distance before flags/rings/stage counts.
+
+Do not copy fixed tiles, stage counts, ring depths, synchronization intervals, transfer thresholds or AIC:AIV ratios from reference projects.
 
 ## Codex autonomy
 
-The design library deliberately does not choose exact tile sizes, core counts, queue depths, TilingKey thresholds, buffer layouts or legal mathematical reformulations. Codex owns those choices and may reject a Harness suggestion with a reason tied to contract/API/evidence.
+The Harness must not choose exact mathematical reformulations, tile sizes, core counts, queue depths, ring depths, UB/L1/L0 layouts, TilingKey counts/thresholds, or specializations. Codex owns those choices and must justify them from the current operator and target.
 
-The design mode is successful when it exposes missing decisions early; it is not intended to make every operator structurally identical.
+The design layer succeeds when it exposes a high-value missing decision early; it is not intended to make every operator structurally identical.
 
 ## Baseline completion gate
 
-Before entering performance work:
+Before performance work:
 
 - public interface unchanged;
 - target build passes;
 - required correctness/precision matrix passes;
-- local target adaptation, if any, is scoped and auditable;
-- `tasks/<task>/design.md` reflects the retained architecture.
-
-Only then continue to Part II.
+- any local target adaptation is scoped and auditable;
+- `tasks/<task>/design.md` matches the retained architecture.
 
 # Part II — Performance optimization
 
@@ -108,11 +130,7 @@ Read:
 - `docs/ascend-kernel-research.md`
 - `tasks/<task>/optimization-log.md` when present
 
-Record `git status --short` and identify the immutable platform-visible interface.
-
-## Diagnosis is the default entry point
-
-Before choosing a performance candidate, prefer:
+Before choosing a candidate, prefer:
 
 ```bash
 python3 tools/agent_loop.py diagnose \
@@ -120,130 +138,57 @@ python3 tools/agent_loop.py diagnose \
   --name pre-candidate
 ```
 
-This runs configured gates, runs `PROFILE_CMD` when available, performs conservative source analysis, and attaches a ranked research-derived shortlist to the task-local harness record.
+With fresh build/correctness evidence, a cheap source-only pass may use `--skip-build --skip-validate --skip-profile`.
 
-When recent build/correctness evidence already exists and a cheap source-only pass is intended:
-
-```bash
-python3 tools/agent_loop.py diagnose \
-  --task <task> \
-  --skip-build \
-  --skip-validate \
-  --skip-profile \
-  --name source-scan
-```
-
-`profile` mode also attaches diagnosis automatically.
-
-Do not treat `static_risk_tags` as measured bottlenecks. Evidence priority is:
+Evidence priority is:
 
 `profile-observed > configured hypothesis > static source risk`.
 
-If profile and static class inference disagree, inspect the conflict before editing.
+Never report a static risk as a measured bottleneck.
 
-## Stable profiler evidence contract
+## Performance model
 
-A task profiler wrapper may optionally emit:
-
-```text
-HARNESS_OPERATOR_CLASS=<vector|cube|mixed_cv>
-HARNESS_BOTTLENECKS=<comma-separated tags>
-HARNESS_PROFILE_NOTE=<short measured observation>
-```
-
-Allowed tags include:
-
-`pipeline`, `memory`, `bandwidth`, `cache`, `compute`, `latency`, `underutilization`, `scalar`, `synchronization`, `tiling`, `sparse`.
-
-Only emit claims supported by actual profiler evidence.
-
-Generic task configuration knobs:
-
-```bash
-PERF_OPERATOR_CLASS=auto
-PERF_SOURCE_DIRS=''
-PERF_BOTTLENECK_HINTS=''
-PERF_PLAN_LIMIT=5
-PERF_ADVANCED=0
-```
-
-Do not encode testcase IDs or reference-project magic numbers in these settings.
-
-## Mandatory Ascend performance model
-
-### A. Classify the hot path
-
-Resolve one primary class:
+Classify the hot path as one primary family:
 
 - `vector`: `GM -> UB -> V -> UB -> GM`
 - `cube`: `GM -> L1 -> L0 -> Cube -> L0C/FIX -> GM`
 - `mixed_cv`: substantial Cube and Vector stages exchange tiles/workspace
 
-Do not force C/V techniques onto pure Vector work.
+For the relevant resources, model Scalar, MTE1/MTE2/MTE3, Vector, Cube, UB/L1/L0, workspace and synchronization edges.
 
-### B. Draw resources and true dependencies
+For each wait/barrier ask:
 
-List relevant Scalar, MTE1/MTE2/MTE3, Vector, Cube, UB/L1/L0, workspace and flag edges.
-
-For every wait/barrier ask:
-
-- true data dependency or only buffer/workspace reuse?
-- how many tasks may safely be in flight?
+- true data dependency or buffer/workspace reuse?
+- how much work may safely be in flight?
 - which values remain live across that lead distance?
 
-### C. Perform the research-derived scan
+## Research-derived performance questions
 
-Check these questions before selecting a candidate:
+Use only when supported by evidence:
 
-1. **Dependency axes** — keep true recurrence chains local; parallelize orthogonal axes.
-2. **Working-set liveness** — derive buffer/ring depth from live ranges, async hazards and cache/on-chip capacity.
-3. **Locality/conflict** — consider grouped/swizzled reuse and phase-shifted traversal when cores contend for the same GM phase.
-4. **Movement** — assemble sparse/paged/reformatted fragments directly in UB/L1 when legal instead of materializing GM intermediates.
-5. **Algorithmic passes** — fuse related full reduction scans when an online correction preserves the numerical contract.
-6. **Hardware path** — verify anomalously slow dtype/shape/API combinations lower to the intended hardware path.
-7. **Autotune regime** — use a small hardware-pruned search keyed by performance-relevant shape/dtype/layout regimes.
+- keep recurrence chains local and parallelize orthogonal axes;
+- size rings/stages from live ranges, async hazards and cache/on-chip capacity;
+- improve cache reuse or phase-shift independent traversal when cores contend for the same GM phase;
+- assemble sparse/paged fragments directly in UB/L1 when legal instead of materializing GM intermediates;
+- reduce full GM passes when an online/pass-fused formulation preserves numerical semantics;
+- verify anomalously slow dtype/shape/API combinations use the intended hardware path;
+- use a small hardware-pruned regime search rather than blind autotuning.
 
-## High-value rules learned from real Ascend kernels
+High-value lessons from production kernels:
 
-- More buffers/stages are not monotonically better.
-- Only asynchronously shared buffers need multi-buffering.
-- Ping-pong can still leave output-block boundary bubbles; model prologue/main/drain.
-- Resident and streaming operands are asymmetric.
-- Per-task C/V ready/wait can create lockstep; a bounded credit window may be better when dependency distance permits.
-- Cross-core synchronization can sometimes be batched, but tail flush and true dependencies are mandatory.
-- Ring depth should follow temporary live windows and cache fit, not a fixed maximum.
-- Task order can affect both cache reuse and synchronized GM contention.
-- Recurrent state should stay on one task/core when possible.
-- Reducing GM passes can be worth extra Vector arithmetic.
-- Supported dtype does not imply a fast implementation path.
-- MicroAPI/register kernels are advanced tools for a proven inner hotspot, not a default rewrite.
-
-Never copy fixed stage counts, ring depths, synchronization intervals, AIC:AIV ratios, tile shapes or transfer thresholds from another repository.
-
-## Candidate planner
-
-`agent_loop.py diagnose/profile` already embeds a shortlist. Standalone lookup remains available:
-
-```bash
-python3 tools/ascend_perf_plan.py \
-  --task <task> \
-  --operator-class <vector|cube|mixed_cv> \
-  --bottleneck <tag>
-```
-
-Advanced patterns stay hidden unless profile and target API evidence justify them:
-
-```bash
-python3 tools/agent_loop.py diagnose \
-  --task <task> \
-  --advanced-diagnosis
-```
-
-The registry is a hypothesis library, not an automatic rewrite engine.
+- more buffers/stages are not monotonically better;
+- only asynchronously shared buffers need multi-buffering;
+- ping-pong can still leave output-block boundary bubbles;
+- resident and streaming operands are asymmetric;
+- per-task C/V ready/wait can create lockstep;
+- synchronization may sometimes be batched, but true dependencies and tail flush remain mandatory;
+- task order affects both cache reuse and synchronized GM contention;
+- reducing GM traffic can justify extra Vector arithmetic;
+- MicroAPI/register kernels are advanced tools for a proven hotspot, not a default rewrite.
 
 ## One-candidate rule
 
-Each candidate must state:
+Each candidate states:
 
 - hypothesis;
 - evidence level and bottleneck;
@@ -253,9 +198,9 @@ Each candidate must state:
 - correctness/precision risk;
 - exact same-case evaluation plan.
 
-Then run target build -> correctness -> benchmark. Profile only to answer a concrete question. Do not stack an unproven mechanism into the retained implementation.
+Then run target build → correctness → benchmark. Profile only to answer a concrete question. Do not stack an unproven mechanism into the retained implementation.
 
-When candidates interact, use this order:
+When mechanisms interact, prefer this order:
 
 1. dependency-safe task decomposition;
 2. layout/data movement;
@@ -264,8 +209,6 @@ When candidates interact, use this order:
 5. tiling/regime autotune;
 6. advanced hardware-path/register microkernel.
 
-Recompute memory budgets after any change to live buffers.
-
 ## Promotion
 
 Promote only when:
@@ -273,12 +216,10 @@ Promote only when:
 - public interface unchanged;
 - target build passes;
 - required correctness/precision passes;
-- same-case performance improvement exceeds noise;
-- no required shape/dtype/mode is narrowed;
+- same-case performance improves beyond noise;
+- no required shape/dtype/mode domain is narrowed;
 - target/proxy evidence is labeled correctly.
 
-Record `PROMOTE`, `REJECT` or `INCONCLUSIVE` in `tasks/<task>/optimization-log.md`, including failed experiments.
+Record `PROMOTE`, `REJECT` or `INCONCLUSIVE`, including failed experiments.
 
-CANNJudge score is authoritative platform evidence only when actually returned by CANNJudge. Local proxy measurements are not target-platform proof.
-
-Never optimize by guessing hidden testcases.
+CANNJudge score is authoritative platform evidence only when actually returned by CANNJudge. Local proxy measurements are not target-platform proof. Never optimize by guessing hidden testcases.

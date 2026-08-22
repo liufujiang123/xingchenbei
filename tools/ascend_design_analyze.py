@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Conservative Ascend operator-development design analyzer.
+"""Conservative, attention-budgeted Ascend operator design analyzer.
 
-This tool does not generate kernel code and does not infer contract semantics from
-file names. It turns explicit archetype hints plus strong source/document signals
-into a compact design checklist for Codex.
+The knowledge base may be broad, but only a tiny active subset is injected into
+Codex context. Static source/document signals are advisory and never become
+contract facts. Concrete algorithms, tile sizes, core counts, queue depths and
+specialization thresholds remain Codex decisions.
 """
 from __future__ import annotations
 
@@ -17,21 +18,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "config" / "ascend_design_patterns.json"
 
 TEXT_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp", ".py", ".md", ".json", ".txt"}
-IGNORE_PARTS = {
-    ".git",
-    ".agent-deps",
-    "build",
-    "output",
-    "dist",
-    "runs",
-    "profiles",
-    "__pycache__",
-    "generated",
-}
+IGNORE_PARTS = {".git", ".agent-deps", "build", "output", "dist", "runs", "profiles", "__pycache__", "generated"}
 MAX_FILE_BYTES = 768 * 1024
 MAX_TOTAL_BYTES = 6 * 1024 * 1024
+MAX_ACTIVE_PATTERNS = 3
+MAX_DEEP_DIVES = 1
+MAX_DEFERRED_IDS = 8
+RISK_SIGNAL_TAGS = {
+    "mode", "optional", "rank_dispatch", "host_materialize", "pad", "reduction",
+    "scan", "recurrent", "state", "workspace", "sparse", "gather", "paged",
+    "index", "cross_core", "mixed_cv",
+}
 
-# Strong content signals only. File names are intentionally not used to infer semantics.
 SIGNAL_RULES = {
     "mode": [r"\bTilingKey\b", r"\btiling[_ ]?key\b", r"\bbackward\b", r"\bforward\b"],
     "optional": [r"\bGetOptionalInput\b", r"\bOptional\b", r"\bnullptr\b", r"\boptional input\b"],
@@ -67,31 +65,16 @@ SIGNAL_RULES = {
 }
 
 ARCHETYPE_FROM_TAGS = {
-    "broadcast": {"broadcast"},
-    "reduction": {"reduction"},
-    "scan": {"scan"},
-    "recurrent": {"recurrent"},
-    "sparse": {"sparse", "paged"},
-    "gather": {"gather"},
-    "matmul": {"cube"},
-    "normalization": {"softmax", "normalization"},
-    "attention": {"attention"},
-    "elementwise": {"elementwise"},
-    "composite": {"cross_core"},
+    "broadcast": {"broadcast"}, "reduction": {"reduction"}, "scan": {"scan"},
+    "recurrent": {"recurrent"}, "sparse": {"sparse", "paged"}, "gather": {"gather"},
+    "matmul": {"cube"}, "normalization": {"softmax", "normalization"},
+    "attention": {"attention"}, "elementwise": {"elementwise"}, "composite": {"cross_core"},
 }
 
 PHASE_ORDER = {
-    "contract": 0,
-    "semantics": 1,
-    "parallelism": 2,
-    "layout": 3,
-    "tiling": 4,
-    "memory": 5,
-    "precision": 6,
-    "architecture": 7,
-    "implementation": 8,
-    "platform": 9,
-    "validation": 10,
+    "contract": 0, "semantics": 1, "parallelism": 2, "layout": 3, "tiling": 4,
+    "memory": 5, "precision": 6, "architecture": 7, "implementation": 8,
+    "platform": 9, "validation": 10,
 }
 
 
@@ -143,8 +126,7 @@ def first_match(text, regexes):
         match = re.search(regex, text, re.IGNORECASE | re.MULTILINE)
         if match:
             line = text.count("\n", 0, match.start()) + 1
-            snippet = text.splitlines()[line - 1].strip()
-            return line, snippet[:180]
+            return line, text.splitlines()[line - 1].strip()[:180]
     return None
 
 
@@ -155,7 +137,6 @@ def scan_sources(paths):
     interface_evidence = []
     host_sources = 0
     kernel_sources = 0
-
     for path in iter_text_files(paths):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -170,15 +151,12 @@ def scan_sources(paths):
             host_sources += 1
         if "op_kernel" in parts:
             kernel_sources += 1
-
         for regex in (r"\bOpDef\b", r"\.Input\s*\(", r"\.Output\s*\(", r"\.Attr\s*\("):
             match = re.search(regex, text)
             if match:
-                line = text.count("\n", 0, match.start()) + 1
-                interface_evidence.append({"file": rel, "line": line, "kind": regex})
+                interface_evidence.append({"file": rel, "line": text.count("\n", 0, match.start()) + 1, "kind": regex})
                 if len(interface_evidence) >= 8:
                     break
-
         for tag, regexes in SIGNAL_RULES.items():
             if tag in signals and len(signals[tag]) >= 3:
                 continue
@@ -186,19 +164,12 @@ def scan_sources(paths):
             if hit:
                 line, snippet = hit
                 signals.setdefault(tag, []).append({"file": rel, "line": line, "snippet": snippet})
-
     if "cube" in signals and "vector" in signals:
-        signals.setdefault("mixed_cv", []).append(
-            {"file": "<derived>", "line": 0, "snippet": "both Cube/AIC and Vector/AIV source signals are present"}
-        )
-
+        signals.setdefault("mixed_cv", []).append({"file": "<derived>", "line": 0, "snippet": "both Cube/AIC and Vector/AIV source signals are present"})
     return {
-        "files_scanned": len(files),
-        "task_contract_files": task_contract_files,
-        "host_source_count": host_sources,
-        "kernel_source_count": kernel_sources,
-        "public_interface_evidence": interface_evidence[:8],
-        "signals": signals,
+        "files_scanned": len(files), "task_contract_files": task_contract_files,
+        "host_source_count": host_sources, "kernel_source_count": kernel_sources,
+        "public_interface_evidence": interface_evidence[:8], "signals": signals,
     }
 
 
@@ -219,73 +190,115 @@ def normalize_archetypes(values, registry):
 
 def suggest_archetypes(signal_tags):
     tags = set(signal_tags)
-    out = []
-    for archetype, required in ARCHETYPE_FROM_TAGS.items():
-        if tags & required:
-            out.append(archetype)
-    return out
+    return [name for name, required in ARCHETYPE_FROM_TAGS.items() if tags & required]
 
 
-def select_patterns(registry, declared, suggested, signal_tags, limit):
+def rank_patterns(registry, declared, suggested, signal_tags):
     tags = set(signal_tags)
-    selected = []
-
+    ranked = []
     for order, pattern in enumerate(registry["patterns"]):
         essential = pattern.get("tier") == "essential"
         applies = set(pattern.get("applies_to", []))
         when_tags = set(pattern.get("when_tags", []))
         declared_match = set(declared) & applies
         suggested_match = set(suggested) & applies
-        tag_match = len(tags & when_tags)
-        if essential:
-            relevance = 100
-            reasons = ["essential"]
+        matched_tags = tags & when_tags
+        if declared_match and matched_tags:
+            relevance = 90 + 5 * len(matched_tags)
+            reasons = ["declared_archetype:" + ",".join(sorted(declared_match)), "signal:" + ",".join(sorted(matched_tags))]
         elif declared_match:
-            relevance = 35 + 4 * tag_match
+            relevance = 80
             reasons = ["declared_archetype:" + ",".join(sorted(declared_match))]
-            if tags & when_tags:
-                reasons.append("signal:" + ",".join(sorted(tags & when_tags)))
-        elif suggested_match and tag_match:
-            relevance = 25 + 4 * tag_match
-            reasons = [
-                "static_archetype:" + ",".join(sorted(suggested_match)),
-                "signal:" + ",".join(sorted(tags & when_tags)),
-            ]
-        elif "all" in applies and tag_match:
-            relevance = 20 + 4 * tag_match
-            reasons = ["signal:" + ",".join(sorted(tags & when_tags))]
+        elif suggested_match and matched_tags:
+            relevance = 75 + 5 * len(matched_tags)
+            reasons = ["static_archetype:" + ",".join(sorted(suggested_match)), "signal:" + ",".join(sorted(matched_tags))]
+        elif "all" in applies and matched_tags:
+            relevance = 70 + 5 * len(matched_tags)
+            reasons = ["signal:" + ",".join(sorted(matched_tags))]
+        elif essential:
+            relevance = 40
+            reasons = ["essential"]
         elif "all" in applies and not when_tags:
-            relevance = 15
+            relevance = 25
             reasons = ["general"]
         else:
             continue
-        selected.append(
-            (
-                -relevance,
-                PHASE_ORDER.get(pattern.get("phase"), 99),
-                order,
-                {
-                    **pattern,
-                    "relevance": relevance,
-                    "reasons": reasons,
-                },
-            )
-        )
+        ranked.append({**pattern, "relevance": relevance, "reasons": reasons, "matched_signal_tags": sorted(matched_tags), "_order": order})
+    ranked.sort(key=lambda item: (-item["relevance"], PHASE_ORDER.get(item.get("phase"), 99), item["_order"]))
+    return ranked
 
-    selected = [item[3] for item in sorted(selected)]
-    if limit <= 0:
+
+def choose_active(ranked, limit):
+    limit = min(max(int(limit), 0), MAX_ACTIVE_PATTERNS)
+    active = []
+    selected_ids = set()
+    used_phases = set()
+    for item in ranked:
+        phase = item.get("phase")
+        if phase in used_phases:
+            continue
+        active.append(item)
+        selected_ids.add(item["id"])
+        used_phases.add(phase)
+        if len(active) >= limit:
+            return active
+    for item in ranked:
+        if item["id"] in selected_ids:
+            continue
+        active.append(item)
+        if len(active) >= limit:
+            break
+    return active
+
+
+def compact_pattern(item, deep=False):
+    out = {
+        "id": item["id"], "title": item["title"], "phase": item.get("phase"),
+        "tier": item.get("tier"), "relevance": item.get("relevance"),
+        "reasons": item.get("reasons", []), "detail_level": "deep_dive" if deep else "prompt",
+        "decide": item["decide"], "guardrails": item["guardrails"],
+    }
+    if deep:
+        out["validate"] = item["validate"]
+        out["deep_dive_trigger"] = item.get("matched_signal_tags", [])
+    return out
+
+
+def resolve_expansions(ranked, registry, expand_ids):
+    requested = []
+    for value in expand_ids or []:
+        for item in re.split(r"[\s,;]+", value.strip()):
+            if item and item not in requested:
+                requested.append(item)
+    if not requested:
         return []
-    return selected[:limit]
+    by_id = {item["id"]: item for item in ranked}
+    registry_by_id = {item["id"]: item for item in registry["patterns"]}
+    unknown = [item for item in requested if item not in registry_by_id]
+    if unknown:
+        raise ValueError("unknown design pattern(s): %s" % ",".join(unknown))
+    expanded = []
+    for pattern_id in requested:
+        item = by_id.get(pattern_id)
+        if item is None:
+            item = {**registry_by_id[pattern_id], "relevance": 0, "reasons": ["explicit_expand"], "matched_signal_tags": []}
+        expanded.append(compact_pattern(item, deep=True))
+    return expanded
 
 
-def analyze(paths, archetypes=None, limit=20, registry_path=REGISTRY):
+def analyze(paths, archetypes=None, limit=MAX_ACTIVE_PATTERNS, registry_path=REGISTRY, expand_ids=None, deep_dive_limit=MAX_DEEP_DIVES):
     registry = load_registry(registry_path)
     declared = normalize_archetypes(archetypes or [], registry)
     scan = scan_sources(paths)
     signal_tags = sorted(scan["signals"])
     suggested = suggest_archetypes(signal_tags)
-    patterns = select_patterns(registry, declared, suggested, signal_tags, limit)
-
+    ranked = rank_patterns(registry, declared, suggested, signal_tags)
+    active_raw = choose_active(ranked, limit)
+    risk_candidates = [item for item in active_raw if set(item.get("matched_signal_tags", [])) & RISK_SIGNAL_TAGS]
+    deep_ids = {item["id"] for item in risk_candidates[:max(0, min(int(deep_dive_limit), MAX_DEEP_DIVES))]}
+    active = [compact_pattern(item, deep=item["id"] in deep_ids) for item in active_raw]
+    active_ids = {item["id"] for item in active_raw}
+    deferred = [item["id"] for item in ranked if item["id"] not in active_ids][:MAX_DEFERRED_IDS]
     unknowns = []
     if not scan["task_contract_files"]:
         unknowns.append("task_contract_not_found_in_scanned_paths")
@@ -295,24 +308,24 @@ def analyze(paths, archetypes=None, limit=20, registry_path=REGISTRY):
         unknowns.append("operator_archetype_not_declared; Codex must resolve it from the contract")
     if not scan["kernel_source_count"]:
         unknowns.append("kernel_source_not_detected; implementation may not exist yet")
-
     return {
-        "kind": "ascend_operator_design",
-        "status": "advisory",
-        "declared_archetypes": declared,
-        "suggested_archetypes": suggested,
+        "kind": "ascend_operator_design", "status": "advisory",
+        "declared_archetypes": declared, "suggested_archetypes": suggested,
         "archetype_rule": "declared archetypes are hints; static suggestions are not contract facts and may be overridden after reading the task statement",
         "contract_evidence": {
             "task_contract_files": scan["task_contract_files"],
             "public_interface_evidence": scan["public_interface_evidence"],
-            "host_source_count": scan["host_source_count"],
-            "kernel_source_count": scan["kernel_source_count"],
+            "host_source_count": scan["host_source_count"], "kernel_source_count": scan["kernel_source_count"],
         },
-        "static_signals": scan["signals"],
-        "files_scanned": scan["files_scanned"],
-        "unknowns": unknowns,
-        "decisions": patterns,
-        "rule": "Use this checklist to expose missing design decisions. Codex owns the concrete algorithm, task mapping, tiling, buffer sizes and specialization choices; authoritative contract/build/correctness evidence overrides all heuristics.",
+        "static_signals": scan["signals"], "files_scanned": scan["files_scanned"], "unknowns": unknowns,
+        "attention_budget": {
+            "active_limit": min(max(int(limit), 0), MAX_ACTIVE_PATTERNS),
+            "deep_dive_limit": min(max(int(deep_dive_limit), 0), MAX_DEEP_DIVES),
+            "policy": "top-k dynamic retrieval; one risk-triggered deep dive; deferred patterns remain ids only",
+        },
+        "decisions": active, "deferred_decision_ids": deferred,
+        "expanded_decisions": resolve_expansions(ranked, registry, expand_ids),
+        "rule": "Only the small active set should enter normal Codex context. Use deferred ids as navigation, not checklist obligations. Expand one pattern only when a concrete risk/unknown requires it. Codex owns the concrete algorithm, task mapping, tiling, buffer sizes and specialization choices; authoritative contract/build/correctness evidence overrides all heuristics.",
     }
 
 
@@ -323,15 +336,27 @@ def print_report(result):
     print("files_scanned=%d" % result["files_scanned"])
     print("static_signal_tags=%s" % (",".join(sorted(result["static_signals"])) or "none"))
     print("unknowns=%s" % ("; ".join(result["unknowns"]) or "none"))
+    budget = result["attention_budget"]
+    print("attention_budget=active:%d deep:%d" % (budget["active_limit"], budget["deep_dive_limit"]))
     print()
     for index, item in enumerate(result["decisions"], 1):
-        print("[%d] %s — %s" % (index, item["id"], item["title"]))
+        print("[%d] %s — %s [%s]" % (index, item["id"], item["title"], item["detail_level"]))
         print("  decide: %s" % item["decide"])
         print("  guardrails: %s" % item["guardrails"])
-        print("  validate: %s" % item["validate"])
-        if item.get("reasons"):
-            print("  selected_by: %s" % "; ".join(item["reasons"]))
+        if item.get("validate"):
+            print("  validate: %s" % item["validate"])
+            print("  deep_dive_trigger: %s" % (",".join(item.get("deep_dive_trigger", [])) or "explicit"))
+        print("  selected_by: %s" % "; ".join(item.get("reasons", [])))
         print()
+    if result["deferred_decision_ids"]:
+        print("deferred_ids=%s" % ",".join(result["deferred_decision_ids"]))
+    if result["expanded_decisions"]:
+        print("\nEXPLICIT EXPANSION")
+        for item in result["expanded_decisions"]:
+            print("%s — %s" % (item["id"], item["title"]))
+            print("  decide: %s" % item["decide"])
+            print("  guardrails: %s" % item["guardrails"])
+            print("  validate: %s" % item["validate"])
     print("rule=%s" % result["rule"])
 
 
@@ -342,10 +367,10 @@ def main():
     parser.add_argument("--workspace")
     parser.add_argument("--source-dir", action="append", default=[])
     parser.add_argument("--archetype", action="append", default=[])
-    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=MAX_ACTIVE_PATTERNS, help="active prompt count; hard-capped at %d" % MAX_ACTIVE_PATTERNS)
+    parser.add_argument("--expand-pattern", action="append", default=[], help="explicitly expand one design pattern by id; may be repeated")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args()
-
     paths = []
     if args.source_dir:
         paths.extend(pathlib.Path(x).expanduser() for x in args.source_dir)
@@ -362,11 +387,9 @@ def main():
                 paths.append(workspace)
     if not paths:
         raise SystemExit("provide --task, --task-dir/--workspace, or --source-dir")
-
     resolved = [p if p.is_absolute() else ROOT / p for p in paths]
-    result = analyze(resolved, archetypes=args.archetype, limit=max(0, args.limit))
+    result = analyze(resolved, archetypes=args.archetype, limit=args.limit, expand_ids=args.expand_pattern)
     result["source_dirs"] = [display_path(p) for p in resolved]
-
     if args.as_json:
         json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
