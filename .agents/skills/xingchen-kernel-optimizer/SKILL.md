@@ -1,176 +1,171 @@
 ---
 name: xingchen-kernel-optimizer
-description: Run an evidence-driven Ascend C competition-kernel workflow with Ascend-first architecture, pipeline, memory and multicore optimization reasoning.
+description: Evidence-driven Ascend C competition optimization with research-derived pipeline, memory, scheduling, synchronization and hardware-path reasoning.
 ---
 
 # Xingchen Kernel Optimizer
 
-Use this skill for competition-kernel implementation and optimization inside this repository.
+Use this skill after the competition contract is understood. Correctness and the public interface remain higher priority than performance.
 
-## Before changing code
+## Sources of truth
 
-1. Read the nearest `AGENTS.md`.
-2. Read `tasks/<task>/TASK.md` and the authoritative competition statement/template.
-3. Run `git status --short`.
-4. Inspect the existing operator with `rg` / `rg --files`.
-5. Identify the immutable platform-visible interface.
-6. If the platform contract is ambiguous and CANNJudge access is available, use `cannjudge-submit` to obtain current problem/package evidence before guessing.
-7. If no correctness baseline exists, prioritize that before performance work.
+1. nearest `AGENTS.md`;
+2. task statement/template and current platform evidence;
+3. target CANN/SOC build and correctness results;
+4. measured benchmark/profile evidence;
+5. official Ascend skills and this repository's research-derived pattern library.
 
-## Platform routing
+Use `cannjudge-submit` only for CANNJudge facts/actions and never submit without explicit user authorization. Never expose credentials.
 
-Use `cannjudge-submit` for CANNJudge-specific work. Do not use platform tooling to infer or access hidden testcases. Never ask for a plaintext CANNJudge password or echo credential material.
+Use the official Ascend skills for architecture/tiling, code generation, compile/debug, precision, performance evaluation and performance optimization. This skill coordinates them; it does not replace them.
 
-## Ascend domain routing
+## Before performance work
 
-Use official Ascend skills as appropriate:
+Confirm a correctness baseline exists. Read:
 
-- architecture/dataflow/tiling design -> `ascendc-operator-design`
-- Host/Kernel code generation and implementation -> `ascendc-operator-code-gen`
-- compiler errors -> `ascendc-operator-compile-debug`
-- numerical failures -> `ascendc-operator-precision-debug`
-- measured performance analysis -> `ascendc-operator-performance-eval`
-- optimization hypotheses/implementation -> `ascendc-operator-performance-optim`
+- `docs/ascend-optimization-playbook.md`
+- `docs/ascend-kernel-research.md`
+- `tasks/<task>/optimization-log.md` when present
 
-Official skills are advisors; repository and competition contracts remain higher priority.
+Record `git status --short` and identify the immutable platform-visible interface.
 
-## Baseline phase
+## Mandatory Ascend performance model
 
-The baseline goal is the simplest implementation that preserves the external interface, covers the required dtype/shape/mode domain, builds on the target CANN/SOC environment, and passes the configured correctness evaluator.
+Before editing performance code, write a short model in the task log.
 
-Do not start speculative performance work until build and correctness pass.
+### A. Classify the hot path
 
-## Mandatory Ascend-first performance model
+Choose one primary class for the candidate:
 
-Before proposing a performance code change, read `docs/ascend-optimization-playbook.md` and write down the hot-path model in the task notes/log.
+- `vector`: `GM -> UB -> V -> UB -> GM`
+- `cube`: `GM -> L1 -> L0 -> Cube -> L0C/FIX -> GM`
+- `mixed_cv`: substantial Cube and Vector stages exchange tiles/workspace
 
-### 1. Classify the hot path
+Do not force C/V techniques onto pure Vector work.
 
-Choose exactly one primary class for the candidate:
+### B. Draw resources and true dependencies
 
-- `vector`: SIMD/Vector dominated; typical flow `GM -> UB -> V -> UB -> GM`.
-- `cube`: Cube/matrix dominated; typical flow includes `L1/L0A/L0B -> M -> L0C/FixPipe`.
-- `mixed_cv`: substantial Cube and Vector stages communicate through on-chip buffers/workspace.
+List relevant Scalar, MTE1/MTE2/MTE3, Vector, Cube, UB/L1/L0, workspace and flag edges.
 
-Do not suggest C/V parallelism for a pure Vector operator. For Vector work, inspect MTE2/MTE3 versus V overlap instead.
+For every wait/barrier ask:
 
-### 2. Build a resource/dependency graph
+- is this a true data dependency?
+- or only buffer/workspace reuse?
+- how many tasks may safely be in flight before overwrite or semantic dependency?
 
-Identify, as applicable:
+### C. Perform the research-derived scan
 
-- Scalar/control work;
-- MTE1/MTE2/MTE3 movement;
-- Vector queue work;
-- Cube queue work;
-- UB/L1/L0 buffers;
-- workspace producer/consumer slots;
-- true SetFlag/WaitFlag/PipeBarrier dependencies;
-- false serialization caused only by buffer reuse.
+Check these six questions before choosing a candidate:
 
-For each stage, ask whether adjacent tiles can execute on independent queues at the same time.
+1. **Dependency axes** — which axis must remain serial, and which orthogonal axes can be parallelized?
+2. **Working-set liveness** — which buffers are simultaneously live? Which buffers are actually touched asynchronously? Does a ring/stage count fit UB/L1/L2 rather than merely fit correctness?
+3. **Locality/conflict** — can task order improve cache reuse, or are many cores reading the same GM region at the same phase?
+4. **Movement** — can paged/sparse/reformatted data be assembled directly in UB/L1 instead of materialized in GM? Are repeated small transfers worth batching?
+5. **Hardware path** — does the target dtype/shape/API lower to the intended vector/Cube/DMA path, or silently use a scalar/slow conversion path?
+6. **Algorithmic passes** — can repeated full scans/reductions be fused while preserving the numerical contract?
 
-### 3. Diagnose the bottleneck
+### D. Diagnose the bottleneck
 
-Use source evidence plus `ascendc-operator-performance-eval`/profiling where available. Classify the current issue with tags such as `pipeline`, `memory`, `bandwidth`, `compute`, `latency`, `underutilization`, or `scalar`.
+Use source evidence plus `ascendc-operator-performance-eval`/msprof or equivalent profiling where available. Tag with one or more of:
 
-Prefer measured pipeline gaps/instruction utilization over intuition.
+`pipeline`, `memory`, `bandwidth`, `cache`, `compute`, `latency`, `underutilization`, `scalar`, `synchronization`, `tiling`, `sparse`.
 
-### 4. Generate Ascend-specific candidates
+Prefer a measured pipeline gap or resource symptom over intuition.
 
-Query the repository registry after classification, for example:
+## Candidate planner
+
+Generate a small shortlist:
 
 ```bash
 python3 tools/ascend_perf_plan.py \
   --task <task> \
-  --operator-class vector \
-  --bottleneck pipeline \
-  --bottleneck memory
+  --operator-class <vector|cube|mixed_cv> \
+  --bottleneck <tag>
 ```
 
-or:
+The default output contains only `core` patterns. Keep this default for ordinary optimization.
+
+Use:
 
 ```bash
-python3 tools/ascend_perf_plan.py \
-  --task <task> \
-  --operator-class mixed_cv \
-  --bottleneck pipeline
+python3 tools/ascend_perf_plan.py ... --advanced
 ```
 
-The registry is a hypothesis library, not an automatic rewrite engine. Confirm target CANN/SOC API support before coding.
+only when profiling and target CANN/SOC API evidence justify lower-level or more fragile mechanisms such as MicroAPI register kernels or direct C/V handoff.
 
-## Ascend optimization ladder
+The registry is a hypothesis library, not an automatic rewrite engine.
 
-Consider these families only when the performance model says they apply.
+## High-value rules learned from real Ascend kernels
 
-### Vector operators
+- **More buffers/stages are not monotonically better.** Derive stage/ring depth from live ranges, dependency distance, on-chip capacity and cache working set.
+- **Only buffers participating in asynchronous producer/consumer access need multi-buffering.** Do not double-buffer Vector-only temporaries without a hazard.
+- **Ping-pong may still leave block-boundary bubbles.** Model prologue/main/epilogue and consider cross-block preload when MTE2 gaps remain.
+- **Resident and streaming operands are asymmetric.** A reused resident operand usually should not consume the same multi-buffer budget as the streamed side.
+- **Cross-core ready/wait per tile can create lockstep.** For mixed C/V, consider legal synchronization batching or a bounded credit window; derive the window from true dependency distance and storage capacity.
+- **Task order affects memory behavior.** Group/swizzle for reuse and phase-shift independent traversal when simultaneous same-address traffic causes bandwidth conflict.
+- **A recurrence should stay local when possible.** Parallelize independent sequence/head/row axes rather than synchronizing recurrent state across cores.
+- **Avoid GM intermediates.** Fuse fragmented gather/reformat into on-chip staging when transfer granularity remains efficient.
+- **Supported dtype does not guarantee a fast hardware path.** Inspect generated target code or API branch when a dtype/shape is anomalously slow.
+- **Reduce bytes before adding arithmetic.** Online/pass-fused formulations can win when they remove full GM scans and remain numerically valid.
 
-- MTE2/MTE3 <-> V overlap;
-- TPipe/TQue producer-consumer pipeline;
-- double buffer / ping-pong buffers when UB permits;
-- aligned full-tile DataCopy fast paths;
-- UB operand/accumulator reuse;
-- multicore/task-granularity balance;
-- remove scalar hot-loop div/mod and invariant address work;
-- precision-safe reduction specialization.
+Do not copy fixed values such as stage count, ring depth, synchronization interval, AIC:AIV ratio, tile shape or transfer threshold from another repository.
 
-### Cube operators
+## One-candidate rule
 
-- Cube-friendly M/N/K tiles and utilization;
-- L1/L0 reuse;
-- MTE1/MTE2 <-> Cube overlap;
-- ping-pong matrix staging;
-- FixPipe/output overlap where legal;
-- multicore tiling and tail balance.
+Each candidate must state:
 
-### Mixed Cube + Vector operators
+- hypothesis;
+- observed bottleneck;
+- expected resource/pipeline effect;
+- one major mechanism changed;
+- additional UB/L1/workspace or code-size cost;
+- correctness/precision risk;
+- exact same-case evaluation plan.
 
-Treat Cube and Vector as a producer-consumer pipeline, not automatically sequential stages. Investigate:
+Then execute target build -> correctness -> benchmark; profile only to answer a concrete question.
 
-- `C(tile n+1) || V(tile n)` overlap;
-- removing unnecessary cross-pipeline barriers;
-- workspace ping-pong/ring buffering so Cube does not wait for Vector to release the same slot;
-- AIC/AIV work-ratio tuning when profile evidence shows an asymmetric bottleneck;
-- Vector-side double buffering;
-- internal fusion/avoiding GM materialization of Cube intermediates when the public contract permits.
+Do not stack an unproven candidate into the retained implementation.
 
-Do not copy fixed ratios or buffer counts from another operator. The GroupedMatmul best-practice pattern is evidence that these mechanisms can matter, not a universal parameter choice.
+## Ordering
 
-## Candidate phase
+When candidates interact, order them explicitly:
 
-For each candidate:
+1. semantic/dependency-safe task decomposition;
+2. layout/data-movement changes;
+3. buffering/residency/pipeline changes;
+4. synchronization/window tuning;
+5. tile/stage/autotune parameters;
+6. advanced hardware-path or register microkernels.
 
-1. State one concrete hypothesis tied to a measured/resource-model bottleneck.
-2. State the expected pipeline/resource effect, e.g. “hide MTE2 of tile n+1 behind V of tile n” or “remove false C/V dependency by using independent workspace slots”.
-3. Change one major optimization dimension at a time.
-4. Keep the public interface unchanged.
-5. Run target build and configured correctness before performance measurement.
-6. Benchmark the same case matrix with warmup and repeated batches.
-7. Keep/reject/inconclusive based on evidence; do not stack an unproven candidate into the baseline.
+Recompute memory budgets after a change that alters live buffers.
 
-A performance candidate is incomplete if it reports only latency without explaining which Ascend resource/pipeline behavior changed.
+## Promotion
 
-## Profile phase
+Promote only when:
 
-Use profiling only to answer a concrete question, such as:
+- public interface unchanged;
+- target build passes;
+- required correctness/precision passes;
+- same-case performance improvement exceeds noise;
+- no required shape/dtype/mode is narrowed;
+- target/proxy evidence is labeled correctly.
 
-- Is Vector waiting on MTE2 or MTE3?
-- Is Cube waiting on MTE1/L1 staging?
-- Are C and V serialized by a true dependency or merely workspace reuse?
-- Is usedCoreNum below useful hardware parallelism for this shape class?
-- Did double buffering reduce pipeline gaps enough to justify its UB cost?
+Record `PROMOTE`, `REJECT` or `INCONCLUSIVE` in `tasks/<task>/optimization-log.md`, including failed experiments.
 
-Interpret profiler results with the official Ascend performance skills. Do not translate NVIDIA-specific metrics mechanically to Ascend.
+CANNJudge score is authoritative platform evidence only when actually returned by CANNJudge. Local A3 measurements must not be presented as 910B proof.
 
-## Promotion rule
+## Attention/sparse-specific extension
 
-A candidate may be promoted only when build and correctness pass, the same-case benchmark improves beyond measurement noise, the required functional domain is not narrowed, precision remains within contract, and SOC-specific proxy evidence is labeled correctly.
+For attention-like or sparse kernels also inspect:
 
-Record the measured result, pipeline hypothesis and decision in `tasks/<task>/optimization-log.md`. Record rejected/inconclusive candidates too.
+- sparse/paged gather coalescing and direct on-chip staging;
+- online softmax / pass fusion;
+- state/recurrent dependency placement;
+- Q/K/V residency and reuse asymmetry;
+- Cube/Vector producer-consumer overlap;
+- workspace live windows and cross-core synchronization;
+- Matmul/MMAD utilization;
+- FP32-sensitive accumulation;
+- avoidance of large score/state GM intermediates.
 
-If CANNJudge is used as an additional evaluator, record submission ID and returned status/score evidence without recording credentials.
-
-## Attention-like sparse kernels
-
-For attention-like sparse kernels, additionally consider sparse gather coalescing, Q sequence x head x sparse-index multicore partition, sparse tile size/tails, GM/L1/UB residency, Cube/Vector overlap, Matmul/MMAD utilization, stable/online softmax, FP32-sensitive accumulation and avoiding large score intermediates.
-
-Do not apply a technique merely because it helps CUDA/Triton kernels; confirm it maps to the target Ascend architecture/API.
+Never optimize by guessing hidden testcases.
