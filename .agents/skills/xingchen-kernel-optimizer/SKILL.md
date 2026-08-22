@@ -1,11 +1,11 @@
 ---
 name: xingchen-kernel-optimizer
-description: Evidence-driven Ascend C competition optimization with source/profile diagnosis and research-derived pipeline, memory, scheduling, synchronization and hardware-path reasoning.
+description: Evidence-driven Ascend C competition operator development and optimization with contract-first design, source/profile diagnosis and research-derived architecture, memory, scheduling, synchronization and hardware-path reasoning.
 ---
 
 # Xingchen Kernel Optimizer
 
-Use this skill after the competition contract is understood. Correctness and the public interface remain higher priority than performance.
+Use this skill to coordinate a competition operator from contract/design through correctness baseline and performance optimization. Correctness and the public interface remain higher priority than performance.
 
 ## Sources of truth
 
@@ -13,15 +13,96 @@ Use this skill after the competition contract is understood. Correctness and the
 2. task statement/template and current platform evidence;
 3. target CANN/SOC build and correctness results;
 4. measured benchmark/profile evidence;
-5. official Ascend skills and this repository's research-derived pattern library.
+5. official Ascend skills and this repository's compact design/performance pattern libraries.
 
 Use `cannjudge-submit` only for CANNJudge facts/actions and never submit without explicit user authorization. Never expose credentials.
 
 Use the official Ascend skills for architecture/tiling, code generation, compile/debug, precision, performance evaluation and optimization. This skill coordinates them; it does not replace them.
 
-## Before performance work
+# Part I — Operator development
 
-Confirm a correctness baseline exists. Read:
+Use this section for a new operator, a missing baseline, or a major architecture rewrite. For a small bug fix, do not force a full redesign.
+
+Read:
+
+- `docs/ascend-operator-development.md`
+- `tasks/<task>/TASK.md`
+- official statement/template/package
+- `tasks/<task>/design.md` when present
+
+Start with:
+
+```bash
+python3 tools/agent_loop.py design \
+  --task <task> \
+  --name initial-design
+```
+
+If the contract has already been read and the mathematical archetype is clear, Codex may provide explicit hints:
+
+```bash
+python3 tools/agent_loop.py design \
+  --task <task> \
+  --archetype reduction \
+  --archetype broadcast \
+  --name initial-design
+```
+
+Allowed archetypes are intentionally broad: `elementwise`, `broadcast`, `reduction`, `scan`, `recurrent`, `sparse`, `gather`, `matmul`, `normalization`, `attention`, `composite`.
+
+`declared_archetypes` are Codex/user hints, not a replacement for the task contract. `suggested_archetypes` come from conservative source signals and are even weaker. Never infer semantics from a filename or identifier alone.
+
+## Mandatory baseline design decisions
+
+Before substantial kernel code, resolve and record these decisions in `tasks/<task>/design.md`:
+
+1. **Contract** — immutable inputs/outputs/attrs/defaults/modes, shape/dtype domain, target CANN/SOC and submission files.
+2. **Semantic graph** — mathematical stages, intermediates, reductions, masks and persistent state.
+3. **Dependency axes** — independent vs reduction-coupled vs recurrence-coupled vs producer-consumer work.
+4. **Task ownership** — what one logical core task owns before micro-tiling.
+5. **Physical layout** — contiguous axes/strides and whether host transforms are views or materializations.
+6. **Host Tiling** — block count, loops, tile regimes, internal mode keys and workspace passed through TilingData.
+7. **Tail/alignment** — full-tile path and partial-tile path.
+8. **Memory lifetime** — register/UB/L1/L0/workspace/GM placement, state vs cross-stage exchange vs scratch.
+9. **Precision** — storage/compute/accumulator/output dtype, reduction order and padding identities.
+10. **Validation matrix** — modes, dtypes, optionals, smallest shapes, alignment boundaries, tails and stress/generalization cases.
+
+These are questions to answer, not fixed implementation templates.
+
+## Architecture prompts by operator family
+
+Apply only when the contract/source supports the family:
+
+- **elementwise/broadcast**: choose independent tile axis and broadcast staging; start with a simple GM->UB->V->GM correctness skeleton.
+- **reduction/normalization**: define reduction ownership and accumulator semantics; count full-data passes and merge cost.
+- **scan/recurrent**: keep carried state with its dependency chain when practical; parallelize orthogonal axes.
+- **sparse/gather/paged**: define index/page/chunk semantics and output order before optimizing staging/locality.
+- **Cube/matmul**: choose M/N/K ownership and resident-vs-streaming operand roles under L1/L0 constraints.
+- **mixed Cube+Vector**: define producer, consumer, intermediate location, true-ready edge, reuse edge and safe in-flight distance before selecting flags/ring depth.
+
+Do not copy fixed tiles, stage counts, ring depths, synchronization intervals or AIC:AIV ratios from reference projects.
+
+## Codex autonomy
+
+The design library deliberately does not choose exact tile sizes, core counts, queue depths, TilingKey thresholds, buffer layouts or legal mathematical reformulations. Codex owns those choices and may reject a Harness suggestion with a reason tied to contract/API/evidence.
+
+The design mode is successful when it exposes missing decisions early; it is not intended to make every operator structurally identical.
+
+## Baseline completion gate
+
+Before entering performance work:
+
+- public interface unchanged;
+- target build passes;
+- required correctness/precision matrix passes;
+- local target adaptation, if any, is scoped and auditable;
+- `tasks/<task>/design.md` reflects the retained architecture.
+
+Only then continue to Part II.
+
+# Part II — Performance optimization
+
+Read:
 
 - `docs/ascend-optimization-playbook.md`
 - `docs/ascend-kernel-research.md`

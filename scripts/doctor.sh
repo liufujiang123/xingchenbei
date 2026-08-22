@@ -42,9 +42,13 @@ fi
 
 python3 -m py_compile \
   "$ROOT/tools/agent_loop.py" \
+  "$ROOT/tools/ascend_design_analyze.py" \
   "$ROOT/tools/ascend_perf_analyze.py" \
   "$ROOT/tools/ascend_perf_plan.py"
 echo "ok: harness python syntax"
+
+python3 "$ROOT/tests/harness/test_ascend_design_analyze.py"
+echo "ok: harness design self-test"
 
 python3 "$ROOT/tests/harness/test_ascend_perf_analyze.py"
 echo "ok: harness diagnosis self-test"

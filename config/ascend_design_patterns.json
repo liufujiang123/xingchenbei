@@ -1,0 +1,283 @@
+{
+  "version": 1,
+  "description": "Compact Ascend operator-development decision patterns. They ask Codex to make and justify decisions without prescribing fixed implementation parameters.",
+  "archetypes": [
+    "elementwise",
+    "broadcast",
+    "reduction",
+    "scan",
+    "recurrent",
+    "sparse",
+    "gather",
+    "matmul",
+    "normalization",
+    "attention",
+    "composite"
+  ],
+  "patterns": [
+    {
+      "id": "contract.freeze_public_interface",
+      "title": "Freeze the platform-visible contract",
+      "phase": "contract",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Record entrypoint, inputs/outputs/attrs, optionality/defaults, dtype/shape/mode semantics, required files and target CANN/SOC from authoritative sources.",
+      "guardrails": "Do not invent missing semantics or expose scheduling choices as new public inputs.",
+      "validate": "Compare registration/host/kernel assumptions with the task statement and current official template/package."
+    },
+    {
+      "id": "contract.domain_and_host_consistency",
+      "title": "Enumerate the legal domain and keep Host metadata consistent",
+      "phase": "contract",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Record legal ranks, shapes, dtypes, modes and optionals, and ensure output shape/dtype inference plus launch setup describe exactly what the kernel produces.",
+      "guardrails": "Visible cases are not the whole domain unless the contract says so; Host and Kernel must not implement divergent mode logic.",
+      "validate": "Exercise shape/launch setup at every mode/rank/optional boundary."
+    },
+    {
+      "id": "contract.resolve_mode_sources",
+      "title": "Define one truth model for overlapping mode signals",
+      "phase": "contract",
+      "tier": "conditional",
+      "applies_to": ["all"],
+      "when_tags": ["mode", "optional", "rank_dispatch"],
+      "decide": "Choose the semantic source of truth and agreement rule when shape, attrs or optional inputs encode the same mode.",
+      "guardrails": "Do not infer precedence/defaults from names.",
+      "validate": "Cover every legal mode and any required disagreement/absent-optional behavior."
+    },
+    {
+      "id": "semantics.stage_graph",
+      "title": "Write the mathematical stage/dependency graph before tiling",
+      "phase": "semantics",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Identify reads, reductions/statistics, intermediates, persistent state and output dependencies, then decide which stages are separate or fused.",
+      "guardrails": "Hardware convenience must not change masks, reduction domains, recurrence order or output semantics.",
+      "validate": "Map each kernel stage back to contract equations/reference behavior."
+    },
+    {
+      "id": "semantics.unify_shape_variants",
+      "title": "Share one semantic core across fixed/varlen/tail variants when practical",
+      "phase": "semantics",
+      "tier": "conditional",
+      "applies_to": ["attention", "scan", "recurrent", "sparse", "composite"],
+      "when_tags": ["varlen", "chunk", "sequence"],
+      "decide": "Hide offset/layout/chunk differences behind helpers or tiling metadata when the algorithm is the same.",
+      "guardrails": "Split paths only for a real algorithm/resource difference, not convenience alone.",
+      "validate": "Check equivalent fixed/varlen boundaries and state/output indexing."
+    },
+    {
+      "id": "parallelism.axes_and_ownership",
+      "title": "Separate dependency axes from parallel axes and assign task ownership",
+      "phase": "parallelism",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Mark each logical axis independent, reduction-coupled, recurrence-coupled or producer-consumer coupled, then choose what one logical core task owns.",
+      "guardrails": "Do not split true recurrence just to raise core count; do not leave independent orthogonal work serial without reason.",
+      "validate": "Check low/high-work regimes, state ownership and tail/load imbalance."
+    },
+    {
+      "id": "layout.physical_contiguity",
+      "title": "Reason from physical layout/strides, not logical shape alone",
+      "phase": "layout",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Identify physically contiguous axes and choose tile/copy orientation accordingly.",
+      "guardrails": "A logical reshape/transpose is not free once contiguity/materialization is required.",
+      "validate": "Cover non-aligned dimensions and all stride/layout forms allowed by the contract."
+    },
+    {
+      "id": "layout.avoid_host_materialization",
+      "title": "Avoid unnecessary full-tensor host materialization",
+      "phase": "layout",
+      "tier": "conditional",
+      "applies_to": ["all"],
+      "when_tags": ["host_materialize", "pad", "transpose", "contiguous"],
+      "decide": "Prefer legal tail/stride-aware kernel handling when host pad/contiguous/transpose would copy full tensors.",
+      "guardrails": "Do not move work into the kernel when the target API cannot express it efficiently or safely.",
+      "validate": "Inspect/measure the full operator path and verify tail writes stay in bounds."
+    },
+    {
+      "id": "tiling.host_runtime_plan",
+      "title": "Keep runtime scheduling in Host Tiling and use only real regimes",
+      "phase": "tiling",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Derive block count, tiles, loops, internal mode keys, workspace and any small set of resource-driven regimes in Host Tiling/TilingData.",
+      "guardrails": "Do not hard-code evaluator shapes or create public scheduling inputs.",
+      "validate": "Check tiling-data ranges, ceil-div math and cases immediately below/at/above every regime boundary."
+    },
+    {
+      "id": "tiling.full_tile_and_tail",
+      "title": "Design aligned full tiles and partial tails explicitly",
+      "phase": "tiling",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Keep the common full-tile path simple and isolate partial work behind legal mask/pad/tail-copy handling.",
+      "guardrails": "Never read/write beyond the contract; do not make all tiles pay tail overhead unless required.",
+      "validate": "Cover size 1 and alignment-1/alignment/alignment+1 plus representative large tails."
+    },
+    {
+      "id": "memory.lifetime_plan",
+      "title": "Place memory by lifetime, reuse distance and ownership",
+      "phase": "memory",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "List simultaneously live values and place persistent state, cross-stage exchange and scratch across registers/UB/L1/L0/workspace/GM.",
+      "guardrails": "Do not alias overlapping lifetimes or multi-buffer data that has no asynchronous ownership hazard.",
+      "validate": "Recompute budgets after tiling, fusion, buffering or dtype changes."
+    },
+    {
+      "id": "memory.workspace_classes",
+      "title": "Separate persistent, cross-stage and scratch workspace",
+      "phase": "memory",
+      "tier": "conditional",
+      "applies_to": ["recurrent", "attention", "composite", "matmul"],
+      "when_tags": ["workspace", "state", "mixed_cv"],
+      "decide": "Give long-lived state, producer-consumer exchange and short scratch separate ownership/reuse models.",
+      "guardrails": "Do not use one maximal ring depth for all temporaries.",
+      "validate": "Check offset/alignment, per-core/head ownership and overwrite distance."
+    },
+    {
+      "id": "precision.compute_contract",
+      "title": "Define storage, compute, accumulation and output precision",
+      "phase": "precision",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "For each stage record storage dtype, casts, compute dtype, accumulator dtype and any required operation order.",
+      "guardrails": "Mathematical equivalence may not preserve signed zero, rounding, saturation or reduction order.",
+      "validate": "Use required bitwise/tolerance checks and precision-sensitive values."
+    },
+    {
+      "id": "precision.padding_identity",
+      "title": "Choose padding/sentinel values from operation semantics",
+      "phase": "precision",
+      "tier": "conditional",
+      "applies_to": ["reduction", "normalization", "attention", "scan"],
+      "when_tags": ["reduction", "padding", "mask", "softmax", "compare"],
+      "decide": "Use the true neutral/sentinel for sum/max/min/mask/select and define NaN/Inf behavior only if the contract requires it.",
+      "guardrails": "Zero is not a universal neutral value.",
+      "validate": "Exercise partial tiles where padded lanes enter reductions/comparisons."
+    },
+    {
+      "id": "elementwise.vector_skeleton",
+      "title": "For elementwise/broadcast work, establish the data-movement skeleton first",
+      "phase": "architecture",
+      "tier": "conditional",
+      "applies_to": ["elementwise", "broadcast"],
+      "when_tags": ["vector", "elementwise", "broadcast"],
+      "decide": "Choose the independent tile axis and broadcast staging for a simple GM->UB->Vector->GM correctness path before deeper pipelining.",
+      "guardrails": "Do not over-engineer small kernels before workload evidence justifies it.",
+      "validate": "Cover singleton broadcast axes, tails and low-work shapes."
+    },
+    {
+      "id": "reduction.ownership_and_passes",
+      "title": "For reductions, define ownership, accumulator semantics and full-data passes",
+      "phase": "architecture",
+      "tier": "conditional",
+      "applies_to": ["reduction", "normalization", "attention"],
+      "when_tags": ["reduction", "softmax", "normalization", "multi_pass"],
+      "decide": "Choose complete-vs-partial reduction ownership, merge strategy, accumulator dtype/order and document baseline full-data pass count.",
+      "guardrails": "Cross-core merges and online/pass-fused formulations change traffic and may change numerical order.",
+      "validate": "Test small/large reduction lengths, tails, cancellation and extreme values."
+    },
+    {
+      "id": "scan.state_locality",
+      "title": "For scan/recurrent work, keep carried state with its dependency chain",
+      "phase": "architecture",
+      "tier": "conditional",
+      "applies_to": ["scan", "recurrent"],
+      "when_tags": ["scan", "recurrent", "state", "prefix"],
+      "decide": "Assign a complete state chain to one logical owner when feasible and parallelize independent batch/head/row/window axes around it.",
+      "guardrails": "Avoid per-step cross-core state handoff unless the algorithm requires it.",
+      "validate": "Test single/multi-step, final partial chunk and initial/final-state forms."
+    },
+    {
+      "id": "sparse.indirection_plan",
+      "title": "For sparse/paged/gather work, separate index semantics from staging",
+      "phase": "architecture",
+      "tier": "conditional",
+      "applies_to": ["sparse", "gather", "attention"],
+      "when_tags": ["sparse", "gather", "paged", "index"],
+      "decide": "Define legal index/page/chunk interpretation and output order before deciding coalescing or direct UB/L1 assembly.",
+      "guardrails": "Do not reorder semantically ordered sparse entries for locality unless permitted.",
+      "validate": "Cover minimal, adjacent/non-adjacent/repeated indices and boundary pages allowed by the contract."
+    },
+    {
+      "id": "cube.resident_streaming_roles",
+      "title": "For Cube work, choose resident and streaming operand roles",
+      "phase": "architecture",
+      "tier": "conditional",
+      "applies_to": ["matmul", "attention", "composite"],
+      "when_tags": ["cube", "matmul", "mmad", "gemm"],
+      "decide": "Choose M/N/K ownership and which reused operand, if any, should remain resident while the other side streams through L1/L0.",
+      "guardrails": "Residency must fit L1/L0 and must not destroy useful multicore parallelism.",
+      "validate": "Check capacity, alignment, K tails and low-M/N occupancy regimes."
+    },
+    {
+      "id": "mixed_cv.protocol_first",
+      "title": "For mixed Cube/Vector work, define the producer-consumer protocol first",
+      "phase": "architecture",
+      "tier": "conditional",
+      "applies_to": ["attention", "composite"],
+      "when_tags": ["mixed_cv", "cross_core", "cube", "vector"],
+      "decide": "Define producer, consumer, intermediate location, true-ready/reuse edges and maximum safe in-flight distance before choosing flags/rings/stage counts.",
+      "guardrails": "Do not default to C-then-V lockstep or copy fixed credit/ring values from another kernel.",
+      "validate": "Prove slot overwrite safety across prologue, steady state and drain."
+    },
+    {
+      "id": "implementation.async_buffer_ownership",
+      "title": "Define asynchronous buffer ownership before queues/flags",
+      "phase": "implementation",
+      "tier": "conditional",
+      "applies_to": ["all"],
+      "when_tags": ["vector", "cube", "cross_core", "workspace", "mixed_cv"],
+      "decide": "For each async CopyIn/compute/CopyOut or cross-core handoff, define who owns each buffer/slot and which event transfers ownership.",
+      "guardrails": "A barrier may hide an ownership bug while serializing the pipeline.",
+      "validate": "Check first iteration, steady state, final partial iteration/drain and slot reuse."
+    },
+    {
+      "id": "specialization.generic_fallback",
+      "title": "Specialize only real regimes and keep a generic fallback",
+      "phase": "implementation",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Use TilingKey/template specialization only for stable algorithm/resource/hardware-path differences.",
+      "guardrails": "Do not specialize on evaluator case IDs or proliferate variants without reason.",
+      "validate": "Test every specialization boundary plus a generic-only case."
+    },
+    {
+      "id": "platform.target_separation",
+      "title": "Keep target-platform source separate from local validation adaptation",
+      "phase": "platform",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Keep official target CANN/SOC implementation authoritative; constrain local adaptation to platform plumbing when possible.",
+      "guardrails": "A local proxy must not become a second algorithm or be presented as target-platform proof.",
+      "validate": "Target build uses official target configuration and local adaptation scope is auditable."
+    },
+    {
+      "id": "validation.matrix_and_localization",
+      "title": "Build the correctness matrix from semantics/hardware boundaries and localize failures",
+      "phase": "validation",
+      "tier": "essential",
+      "applies_to": ["all"],
+      "when_tags": [],
+      "decide": "Cover modes, dtypes, optionals, smallest shapes, alignment/tails, representative/stress cases; classify failures before redesigning architecture.",
+      "guardrails": "Do not weaken tolerance/reference/case coverage or stack speculative fixes.",
+      "validate": "Record comparison mode and add the smallest regression case for each fixed failure."
+    }
+  ]
+}
