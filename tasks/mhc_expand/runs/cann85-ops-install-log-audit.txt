@@ -1,0 +1,135 @@
+OPS910B_LOG path=/home/liufujiang/var/log/ascend_seclog/ascend_ops_910b_install.log mtime=2026-08-19 05:42:22.048199790 +0000 size=25824 owner=liufujiang group=liufujiang mode=640
+9:[ops_910b] [20260819-05:40:35] [WARNING] driver package is not installed. If you install in docker, you should map driver install path and /etc/ascend_install.info to the docker container, you can see the installation guide for details.
+13:[ops_910b] [20260819-05:40:35] [INFO]  delete file /home/liufujiang/ascend-envs/cann-8.5.0/cann successfully.
+14:[ops_910b] [20260819-05:40:35] [INFO]  delete file /home/liufujiang/ascend-envs/cann-8.5.0/ascend-toolkit/latest successfully.
+15:[ops_910b] [20260819-05:40:35] [INFO]  delete file /home/liufujiang/ascend-envs/cann-8.5.0/ascend-toolkit/set_env.sh successfully.
+16:[ops_910b] [20260819-05:40:35] [INFO] The soft link /home/liufujiang/ascend-envs/cann-8.5.0/cann is created successfully.
+17:[ops_910b] [20260819-05:40:35] [INFO] The soft link /home/liufujiang/ascend-envs/cann-8.5.0/ascend-toolkit/latest is created successfully.
+18:[ops_910b] [20260819-05:40:35] [INFO] The soft link /home/liufujiang/ascend-envs/cann-8.5.0/ascend-toolkit/set_env.sh is created successfully.
+19:[ops_910b] [20260819-05:40:35] [INFO] install package cann-910b-ops-legacy_8.5.0_linux-aarch64.run start
+22:[OpsLegacy] [2026-08-19 05:41:01] [INFO]: Uninstall the version before multi version of ops_legacy successfully!
+23:[OpsLegacy] [2026-08-19 05:41:02] [INFO]: Execute the ops_legacy run package.
+25:[OpsLegacy] [2026-08-19 05:41:02] [INFO]: Input params: --quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+26:[OpsLegacy] [2026-08-19 05:41:02] [INFO]: Version of installing ops_legacy module is .
+28:[OpsLegacy] [2026-08-19 05:41:02] [INFO]: Command opp_install
+34:[OpsLegacy] [2026-08-19 05:41:38] [INFO]: Install path: (/home/liufujiang/ascend-envs/cann-8.5.0/cann/share/info/ops_legacy)
+37:[OpsLegacy] [2026-08-19 05:41:38] [INFO]: OpsLegacy package installed successfully! The new version takes effect immediately.
+38:Install SUGGESTION liufujiang 2026-08-19 05:41:38 127.0.0.1 OPP success install_type=full; cmdlist=--quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0.
+40:[ops_910b] [20260819-05:41:39] [INFO] cann-910b-ops-legacy_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+41:[ops_910b] [20260819-05:41:39] [INFO] install package cann-opbase_8.5.0_linux-aarch64.run start
+44:[OpsBase] [2026-08-19 05:41:39] [INFO]: Uninstall the version before multi version of opbase successfully!
+45:[OpsBase] [2026-08-19 05:41:39] [INFO]: Execute the opbase run package.
+47:[OpsBase] [2026-08-19 05:41:39] [INFO]: Input params: --quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+48:[OpsBase] [2026-08-19 05:41:39] [INFO]: Existed opbase module version is 8.5.0, the new opbase module version is 8.5.0.
+50:[OpsBase] [2026-08-19 05:41:40] [INFO]: Command opp_upgrade
+57:[OpsBase] [2026-08-19 05:41:40] [WARNING]: /home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/share/info/opbase/script:, has files changed by users, cannot be delete.
+58:[OpsBase] [2026-08-19 05:41:40] [WARNING]: check_version_required.awk, has files changed by users, cannot be delete.
+59:[OpsBase] [2026-08-19 05:41:40] [WARNING]: cleanup.sh, has files changed by users, cannot be delete.
+60:[OpsBase] [2026-08-19 05:41:40] [WARNING]: common_func.inc, has files changed by users, cannot be delete.
+61:[OpsBase] [2026-08-19 05:41:40] [WARNING]: common_func_v2.inc, has files changed by users, cannot be delete.
+62:[OpsBase] [2026-08-19 05:41:40] [WARNING]: common_installer.inc, has files changed by users, cannot be delete.
+63:[OpsBase] [2026-08-19 05:41:40] [WARNING]: common_interface.csh, has files changed by users, cannot be delete.
+64:[OpsBase] [2026-08-19 05:41:40] [WARNING]: common_interface.fish, has files changed by users, cannot be delete.
+65:[OpsBase] [2026-08-19 05:41:40] [WARNING]: common_interface.sh, has files changed by users, cannot be delete.
+66:[OpsBase] [2026-08-19 05:41:40] [WARNING]: filelist.csv, has files changed by users, cannot be delete.
+67:[OpsBase] [2026-08-19 05:41:40] [WARNING]: install.sh, has files changed by users, cannot be delete.
+68:[OpsBase] [2026-08-19 05:41:40] [WARNING]: install_common_parser.sh, has files changed by users, cannot be delete.
+69:[OpsBase] [2026-08-19 05:41:40] [WARNING]: multi_version.inc, has files changed by users, cannot be delete.
+70:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_common.sh, has files changed by users, cannot be delete.
+71:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_custom_create_softlink.sh, has files changed by users, cannot be delete.
+72:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_custom_install.sh, has files changed by users, cannot be delete.
+73:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_custom_remove_softlink.sh, has files changed by users, cannot be delete.
+74:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_custom_uninstall.sh, has files changed by users, cannot be delete.
+75:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_install.sh, has files changed by users, cannot be delete.
+76:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_uninstall.sh, has files changed by users, cannot be delete.
+77:[OpsBase] [2026-08-19 05:41:40] [WARNING]: opp_upgrade.sh, has files changed by users, cannot be delete.
+78:[OpsBase] [2026-08-19 05:41:40] [WARNING]: script_operator.inc, has files changed by users, cannot be delete.
+79:[OpsBase] [2026-08-19 05:41:40] [WARNING]: uninstall.sh, has files changed by users, cannot be delete.
+80:[OpsBase] [2026-08-19 05:41:40] [WARNING]: ver_check.sh, has files changed by users, cannot be delete.
+81:[OpsBase] [2026-08-19 05:41:40] [WARNING]: version_cfg.inc, has files changed by users, cannot be delete.
+82:[OpsBase] [2026-08-19 05:41:40] [WARNING]: version_compatiable.inc, has files changed by users, cannot be delete.
+83:[OpsBase] [2026-08-19 05:41:40] [INFO]: Ops_base package uninstalled successfully! Uninstallation takes effect immediately.
+92:[OpsBase] [2026-08-19 05:41:42] [INFO]: Install path: (/home/liufujiang/ascend-envs/cann-8.5.0/cann/share/info/opbase)
+96:[OpsBase] [2026-08-19 05:41:42] [INFO]: OpsBase package upgraded successfully! The new version takes effect immediately.
+98:Install MINOR liufujiang 2026-08-19 05:41:42 127.0.0.1 OpsBase success install_type=; cmdlist=--full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0.
+100:[ops_910b] [20260819-05:41:42] [INFO] cann-opbase_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+101:[ops_910b] [20260819-05:41:42] [INFO] install package cann-hixl_8.5.0_linux-aarch64.run start
+104:[hixl] [2026-08-19 05:41:42] [INFO]: InputParams:--quiet --full --pylocal --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+106:[hixl] [2026-08-19 05:41:42] [WARNING]: Cannot find the install path of driver.
+107:[hixl] [2026-08-19 05:41:42] [INFO]: version compatibility check successfully!
+108:[hixl] [2026-08-19 05:41:42] [WARNING]: driver and firmware is not exists, please install first.
+114:[hixl] [2026-08-19 05:41:42] [INFO]: install python module package in /home/liufujiang/selfgz858673597/hixl/lib/llm_datadist-0.0.1-py3-none-any.whl
+115:[hixl] [2026-08-19 05:41:43] [INFO]: install /home/liufujiang/selfgz858673597/hixl/lib/llm_datadist-0.0.1-py3-none-any.whl successfully!
+116:[hixl] [2026-08-19 05:41:43] [INFO]: the hixl extension module installed successfully!
+117:[hixl] [2026-08-19 05:41:43] [INFO]: please make sure PYTHONPATH include /home/liufujiang/ascend-envs/cann-8.5.0/cann/python/site-packages.
+120:[hixl] [2026-08-19 05:41:43] [INFO]: Upgrade base version successfully!
+121:[hixl] [2026-08-19 05:41:43] [INFO]: hixl package installed successfully! The new version takes effect immediately.
+125:            - PYTHONPATH includes /home/liufujiang/ascend-envs/cann-8.5.0/cann/python/site-packages
+127:[ops_910b] [20260819-05:41:44] [INFO] cann-hixl_8.5.0_linux-aarch64.run --full --pylocal --quiet --nox11 install success
+128:[ops_910b] [20260819-05:41:44] [INFO] install package cann-hccl_8.5.0_linux-aarch64.run start
+131:[Hccl] [2026-08-19 05:41:45] [INFO]: InputParams:--quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+133:[Hccl] [2026-08-19 05:41:45] [WARNING]: Cannot find the install path of driver.
+134:[Hccl] [2026-08-19 05:41:45] [INFO]: version compatibility check successfully!
+135:[Hccl] [2026-08-19 05:41:45] [WARNING]: driver and firmware is not exists, please install first.
+136:[Hccl] [2026-08-19 05:41:45] [INFO]: version_installed:none host_only:none host_only_in_runpkg:
+143:[Hccl] [2026-08-19 05:41:46] [INFO]: Upgrade base version successfully!
+144:[Hccl] [2026-08-19 05:41:46] [INFO]: Hccl package installed successfully! The new version takes effect immediately.
+148:            - PYTHONPATH includes /home/liufujiang/ascend-envs/cann-8.5.0/cann/python/site-packages
+150:[ops_910b] [20260819-05:41:47] [INFO] cann-hccl_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+151:[ops_910b] [20260819-05:41:47] [INFO] install package cann-dvpp_8.5.0_linux-aarch64.run start
+154:[Dvpp] [2026-08-19 05:41:47] [INFO]: InputParams:--quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+156:[Dvpp] [2026-08-19 05:41:47] [WARNING]: Cannot find the install path of driver.
+157:[Dvpp] [2026-08-19 05:41:47] [INFO]: version compatibility check successfully!
+158:[Dvpp] [2026-08-19 05:41:47] [WARNING]: driver and firmware is not exists, please install first.
+164:[Dvpp] [2026-08-19 05:41:48] [INFO]: Upgrade base version successfully!
+165:[Dvpp] [2026-08-19 05:41:48] [INFO]: Dvpp package installed successfully! The new version takes effect immediately.
+169:[ops_910b] [20260819-05:41:49] [INFO] cann-dvpp_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+170:[ops_910b] [20260819-05:41:49] [INFO] install package cann-910b-ops-math_8.5.0_linux-aarch64.run start
+172:[OpsMath] [2026-08-19 05:41:49] [INFO]: Execute the opp run package.
+174:[OpsMath] [2026-08-19 05:41:49] [INFO]: Input params: --./run_package/cann-910b-ops-math_8.5.0_linux-aarch64.run --/home/liufujiang/selfgz7711117559 --quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+175:[OpsMath] [2026-08-19 05:41:49] [INFO]: Version of installing opp module is 8.5.0.
+176:[OpsMath] [2026-08-19 05:41:49] [INFO]: Directory is empty, directly install opp module.
+177:[OpsMath] [2026-08-19 05:41:49] [INFO]: Command opp_install
+178:[OpsMath] [2026-08-19 05:41:49] [INFO]: Begin install opp module.
+179:[OpsMath] [2026-08-19 05:41:49] [INFO]: Set the environment path [ export ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp ].
+180:[OpsMath] [2026-08-19 05:41:49] [INFO]: Update the opp install info.
+182:[OpsMath] [2026-08-19 05:41:52] [INFO]: start install python module package es_math.
+183:[OpsMath] [2026-08-19 05:41:53] [INFO]: es_math installed successfully!
+187:[OpsMath] [2026-08-19 05:41:53] [INFO]: Install path: (/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp)
+190:[OpsMath] [2026-08-19 05:41:53] [INFO]: Using requirements: when opp module install finished or before you run the opp module, execute the command [ export ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp ] to set the environment path.
+191:[OpsMath] [2026-08-19 05:41:53] [INFO]: Opp package installed successfully! The new version takes effect immediately.
+192:[ops_910b] [20260819-05:41:53] [INFO] cann-910b-ops-math_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+193:[ops_910b] [20260819-05:41:53] [INFO] install package cann-910b-ops-nn_8.5.0_linux-aarch64.run start
+196:[OpsNN] [2026-08-19 05:41:55] [INFO]: Uninstall the version before multi version of ops_nn successfully!
+197:[OpsNN] [2026-08-19 05:41:55] [INFO]: Execute the ops_nn run package.
+199:[OpsNN] [2026-08-19 05:41:55] [INFO]: Input params: --quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+200:[OpsNN] [2026-08-19 05:41:55] [INFO]: Version of installing ops_nn module is 8.5.0.
+211:[OpsNN] [2026-08-19 05:42:02] [INFO]: OPS_NN package installed successfully! The new version takes effect immediately.
+212:[ops_910b] [20260819-05:42:02] [INFO] cann-910b-ops-nn_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+213:[ops_910b] [20260819-05:42:02] [INFO] install package cann-910b-ops-cv_8.5.0_linux-aarch64.run start
+215:[OpsCv] [2026-08-19 05:42:03] [INFO]: Execute the opp run package.
+217:[OpsCv] [2026-08-19 05:42:03] [INFO]: Input params: --./run_package/cann-910b-ops-cv_8.5.0_linux-aarch64.run --/home/liufujiang/selfgz7711117559 --quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+218:[OpsCv] [2026-08-19 05:42:03] [INFO]: Version of installing opp module is 8.5.0.
+219:[OpsCv] [2026-08-19 05:42:03] [INFO]: Directory is empty, directly install opp module.
+220:[OpsCv] [2026-08-19 05:42:03] [INFO]: Command opp_install
+221:[OpsCv] [2026-08-19 05:42:03] [INFO]: Begin install opp module.
+222:[OpsCv] [2026-08-19 05:42:03] [INFO]: Set the environment path [ export ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp ].
+223:[OpsCv] [2026-08-19 05:42:03] [INFO]: Update the opp install info.
+228:[OpsCv] [2026-08-19 05:42:05] [INFO]: Install path: (/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp)
+231:[OpsCv] [2026-08-19 05:42:05] [INFO]: Using requirements: when opp module install finished or before you run the opp module, execute the command [ export ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp ] to set the environment path.
+232:[OpsCv] [2026-08-19 05:42:05] [INFO]: Opp package installed successfully! The new version takes effect immediately.
+233:[ops_910b] [20260819-05:42:05] [INFO] cann-910b-ops-cv_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+234:[ops_910b] [20260819-05:42:05] [INFO] install package cann-910b-ops-transformer_8.5.0_linux-aarch64.run start
+236:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Execute the opp run package.
+238:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Input params: --./run_package/cann-910b-ops-transformer_8.5.0_linux-aarch64.run --/home/liufujiang/selfgz7711117559 --quiet --full --install-path=/home/liufujiang/ascend-envs/cann-8.5.0
+239:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Version of installing opp module is 8.5.0.
+240:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Directory is empty, directly install opp module.
+241:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Command opp_install
+242:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Begin install opp module.
+243:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Set the environment path [ export ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp ].
+244:[OpsTransformer] [2026-08-19 05:42:13] [INFO]: Update the opp install info.
+249:[OpsTransformer] [2026-08-19 05:42:21] [INFO]: Install path: (/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp)
+252:[OpsTransformer] [2026-08-19 05:42:21] [INFO]: Using requirements: when opp module install finished or before you run the opp module, execute the command [ export ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann/opp ] to set the environment path.
+253:[OpsTransformer] [2026-08-19 05:42:21] [INFO]: Opp package installed successfully! The new version takes effect immediately.
+254:[ops_910b] [20260819-05:42:21] [INFO] cann-910b-ops-transformer_8.5.0_linux-aarch64.run --full --quiet --nox11 install success
+257:[ops_910b] [20260819-05:42:22] [INFO] The permission on the file and folder is granted successfully.

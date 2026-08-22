@@ -1,0 +1,67 @@
+MhcExpand CANN 8.5 correctness attempt on logic device 2
+Date (UTC): 2026-08-19
+
+Scope:
+  Correctness-only staging. No benchmark, profile, performance optimization,
+  device reset, process kill, Driver change, Firmware change, or system CANN
+  change was performed.
+
+DEVICE 2 RUNTIME CONTROL
+
+Initial standalone ACL lifecycle probe:
+  aclInit: rc=0, elapsed=9.758 ms
+  aclrtSetDevice(2): rc=0, elapsed=9570.428 ms
+  aclrtCreateContext: rc=0, elapsed=0.838 ms
+  aclrtDestroyContext: rc=0, elapsed=0.672 ms
+  aclrtResetDevice: rc=0, elapsed=248.996 ms
+  aclFinalize: rc=0, elapsed=180.766 ms
+  result: ACL_RUNTIME_PASS
+
+The approximately 9.5-second aclrtSetDevice latency is abnormally high, even
+though this invocation returned success. It is an environment/runtime risk and
+must not be included in any future kernel performance measurement.
+
+CANN 8.5 CUSTOM PACKAGE PROVENANCE
+
+  Source timestamps precede the package timestamp.
+  CMake ASCEND_CANN_PACKAGE_PATH points to the isolated CANN 8.5 tree.
+  Package SHA256:
+    982ca155d43f13a8238fef3b84d376090d57eb7659f2b9bc38736d19a04c1c8f
+  The package was installed into a fresh task-local temporary directory.
+  Installed ACLNN library:
+    <fresh-temp>/vendors/custom/op_api/lib/libcust_opapi.so
+  Exported symbols:
+    aclnnMhcExpandGetWorkspaceSize
+    aclnnMhcExpand
+  ldd resolved libascendcl, libnnopbase, libruntime, and other CANN userspace
+  dependencies from the isolated CANN 8.5 tree. No CANN 9 userspace library
+  appeared.
+
+FORWARD SMOKE ATTEMPT
+
+Requested case:
+  dtype=FP16, S=1, D=16, mhc_mult=2, backward=false, device=2
+  deterministic input=[0, 1, ..., 15]
+
+Attempt 1:
+  A 90-second timeout expired. The one-off script used buffered stdout, so this
+  attempt did not provide trustworthy stage localization and is not classified
+  as an operator failure.
+
+Attempt 2 (unbuffered, stage markers before every operation):
+  Printed runtime_create_start, then remained inside AclRuntime construction
+  for more than 70 seconds. It never printed runtime_create_end or
+  custom_library_load_start. The timeout terminated only this probe process.
+  Therefore the failure happened in the base ACL runtime path before custom
+  library loading, ACLNN Host API, tiling, kernel launch, or synchronization.
+
+Post-timeout read-only check:
+  No probe/smoke process remained.
+  npu-smi showed no NPU process on the card containing logic device 2.
+
+TEST GATE RESULT
+
+  DEVICE 2 RUNTIME BLOCKED
+  Forward/BF16/backward/boundary/full validation were not run.
+  No numerical result or error statistic exists.
+  No MhcExpand source file was changed in response to this environment failure.

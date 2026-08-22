@@ -97,6 +97,6 @@ python3 tools/cannjudge_eval.py rank --task mhc_expand
 
 ## Evidence and decisions
 
-A platform run records Git metadata, source SHA-256 values, submission ID, returned status/result, and score when available. Credentials are never included. An `Accepted` result with a numeric score is compared against `best-platform.json`; local benchmark scores use `best-local.json` and never overwrite platform bests.
+A platform run records Git metadata, source SHA-256 values, submission ID, returned status/result, and score when available. Credentials are never included. A successful terminal result (`Accepted` or the platform's observed `Pass`) with a numeric score is compared against `best-platform.json`; local benchmark scores use `best-local.json` and never overwrite platform bests.
 
 Do not equate local A3 correctness with platform 910B correctness. For MhcExpand, the intended evidence labels remain `PLATFORM 910B BUILD PASS` and `LOCAL A3 CORRECTNESS PASS` until CANNJudge returns a real platform result.

@@ -21,6 +21,7 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TERMINAL_STATUSES = {
     "Accepted",
+    "Pass",
     "Wrong Answer",
     "Compile Error",
     "Runtime Error",

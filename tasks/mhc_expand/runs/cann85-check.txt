@@ -1,0 +1,33 @@
+MhcExpand isolated CANN 8.5 environment check
+Date (UTC): 2026-08-19
+
+CANN_ENV_VERSION=8.5.0
+CANN_HOME=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0
+CANN85_SET_ENV=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0/set_env.sh
+ASCEND_HOME_PATH=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0
+ASCEND_OPP_PATH=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0/opp
+CCEC=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0/tools/bisheng_compiler/bin/bisheng
+BISHENG=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0/tools/bisheng_compiler/bin/bisheng
+INCLUDE=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0/aarch64-linux/include
+LIBASCENDCL=$HOME/ascend-envs/cann-8.5.0/cann-8.5.0/aarch64-linux/lib64/libascendcl.so
+PYTHON=$HOME/venvs/xingchenbei-cann85/bin/python (Python 3.9.9)
+
+Toolkit metadata:
+  version=8.5.0
+  innerversion=V100R001C25SPC001B232
+  arch=aarch64
+ops metadata:
+  package_name=Ascend-cann-910b-ops
+  version=8.5.0
+  innerversion=V100R001C25SPC001B232
+
+No CANN 9 Toolkit/compiler/OPP path appeared in PATH, LD_LIBRARY_PATH,
+PYTHONPATH, or CMAKE_PREFIX_PATH. Shared driver libraries intentionally resolve
+from /usr/local/Ascend/driver; CANN user-space libraries resolve from CANN_HOME.
+
+A/B test from a parent shell loaded with CANN 9.0.0-beta.1:
+  PARENT_BEFORE_ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.0.0-beta.1
+  child CANN_ENV_VERSION=8.5.0
+  child result=CANN85_ENVIRONMENT_OK
+  PARENT_AFTER_ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.0.0-beta.1
+  result=PARENT_ENVIRONMENT_UNCHANGED

@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+PLATFORM_PASS_STATUSES = {"Accepted", "Pass"}
 
 
 def shq(value):
@@ -260,9 +261,9 @@ def main():
         elif args.mode == "platform":
             platform = record.get("platform", {})
             status = platform.get("status", "Unknown")
-            if status == "Accepted":
+            if status in PLATFORM_PASS_STATUSES:
                 if platform.get("score") is None:
-                    record["decision"] = "passed:platform_accepted_no_score"
+                    record["decision"] = "passed:platform_%s_no_score" % status.lower()
                 else:
                     direction = env.get("PLATFORM_SCORE_DIRECTION", "higher")
                     record["decision"] = promote_decision(

@@ -1,0 +1,71 @@
+ASCEND_HOME_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0
+ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp
+package_name=Ascend-cann-toolkit
+version=8.5.0
+innerversion=V100R001C25SPC001B232
+compatible_version=[V100R001C15],[V100R001C18],[V100R001C19],[V100R001C20],[V100R001C21],[V100R001C23]
+arch=aarch64
+os=linux
+path=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0
+package_name=Ascend-cann-A3-ops
+version=8.5.0
+innerversion=V100R001C25SPC001B232
+compatible_version=[V100R001C15],[V100R001C18],[V100R001C19],[V100R001C20],[V100R001C21],[V100R001C23]
+arch=aarch64
+os=linux
+path=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0
+EXPECTED_INDEXES_BEGIN
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_cv/binary_info_config.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_legacy/binary_info_config.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_math/binary_info_config.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_nn/binary_info_config.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_transformer/binary_info_config.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910b/ops_oam/binary_info_config.json
+EXPECTED_INDEXES_END
+EXPECTED_ABS_CONFIGS_BEGIN
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs/Abs_1c4543fdfe7149b6b0717bd88f061562_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs/Abs_1d2fd313763487259859439d7e9b41cf_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs/Abs_5c5e58e043224cccf51a06108010ae13_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs/Abs_8098b79498645e9c0da095babdeaf862_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs/Abs_d2db1a80c523e7e59a032c95969880af_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs_grad/AbsGrad_93b3f8e9594b4018902b635fff3a83c5_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs_grad/AbsGrad_ce3d1ff8ba23a0bcb292da3577c1625d_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/abs_grad/AbsGrad_ee98c6628030785f610b924ab1557b31_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/complex_abs/ComplexAbs_40731753d688493c63203dca14b0f092_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_legacy/complex_abs/ComplexAbs_51f2c10f26ae1cd1b143dc0c19f236a5_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_nn/foreach_abs/ForeachAbs_0f7470551d61134bcca200a197e8952e_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_nn/foreach_abs/ForeachAbs_3c4f1eb9754c78f47d2b389d7b1bba7e_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/ascend910_93/ops_nn/foreach_abs/ForeachAbs_5217b558219e9165606a17a79af94fa8_high_performance.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_legacy/abs_grad.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_legacy/abs.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_legacy/complex_abs.json
+/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_nn/foreach_abs.json
+EXPECTED_ABS_CONFIGS_END
+VENDORS_CONFIG_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/vendors/config.ini
+VENDORS_CONFIG_EXISTS=no
+BINARY_INDEX_DETAILS_BEGIN
+BINARY_INDEX_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_cv/binary_info_config.json
+BINARY_INDEX_STAT mode=-r-xr-x--- octal=550 owner=liufujiang group=liufujiang size=62561
+65d339c9ca86d439062a2aaafb357c142a98d451bdcaedaa3ba33e269231c0e5  /home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_cv/binary_info_config.json
+BINARY_INDEX_READABLE=yes
+BINARY_INDEX_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_legacy/binary_info_config.json
+BINARY_INDEX_STAT mode=-r-xr-x--- octal=550 owner=liufujiang group=liufujiang size=4326073
+5017dac31ac00e6ffb60bb97ba5b7845429273cac88156654dc104ffe85aedcb  /home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_legacy/binary_info_config.json
+BINARY_INDEX_READABLE=yes
+BINARY_INDEX_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_math/binary_info_config.json
+BINARY_INDEX_STAT mode=-r-xr-x--- octal=550 owner=liufujiang group=liufujiang size=123142
+9bf1f33d936d373163c632e8acfc2cd3fb33650af3e1d0ea9f58b99a5bf26523  /home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_math/binary_info_config.json
+BINARY_INDEX_READABLE=yes
+BINARY_INDEX_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_nn/binary_info_config.json
+BINARY_INDEX_STAT mode=-r-xr-x--- octal=550 owner=liufujiang group=liufujiang size=633200
+91f30cfb9835006a9a38fc9eac6a87c16882451d4eb4f4ae224f83188335abd2  /home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_nn/binary_info_config.json
+BINARY_INDEX_READABLE=yes
+BINARY_INDEX_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_transformer/binary_info_config.json
+BINARY_INDEX_STAT mode=-r-xr-x--- octal=550 owner=liufujiang group=liufujiang size=495567
+4263ef5a996ae57c28670f6a0ca8fdf506364537edbda3768b777cd1fc6f5133  /home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910_93/ops_transformer/binary_info_config.json
+BINARY_INDEX_READABLE=yes
+BINARY_INDEX_PATH=/home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910b/ops_oam/binary_info_config.json
+BINARY_INDEX_STAT mode=-r-xr-x--- octal=550 owner=liufujiang group=liufujiang size=13824
+7dbf088135f26b797bb19864df6c8962eebdc0453a427c08138a1b4c9cfe8425  /home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/kernel/config/ascend910b/ops_oam/binary_info_config.json
+BINARY_INDEX_READABLE=yes
+BINARY_INDEX_DETAILS_END

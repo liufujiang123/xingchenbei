@@ -1,0 +1,556 @@
+LOCAL A3 VALIDATION ONLY
+NOT FOR SUBMISSION
+CANN_VERSION=8.5.0
+OPS_PACKAGE=Ascend-cann-A3-ops
+RUNTIME_SOC=Ascend910_9382
+BUILD_TARGET=ascend910_93
+DEVICE_ID=4
+OFFICIAL_SOURCE=/home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/workspace/code
+TEMPORARY_SOURCE=/tmp/mhc_expand_a3_validation/source
+BUILD_DIR=/tmp/mhc_expand_a3_validation/build
+INSTALL_DIR=/tmp/mhc_expand_a3_validation/install
+diff -ru /home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/workspace/code/CMakeLists.txt /tmp/mhc_expand_a3_validation/source/CMakeLists.txt
+--- /home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/workspace/code/CMakeLists.txt	2026-08-19 03:15:23.592199790 +0000
++++ /tmp/mhc_expand_a3_validation/source/CMakeLists.txt	2026-08-21 14:30:47.520199790 +0000
+@@ -4,7 +4,7 @@
+ 
+ find_package(ASC REQUIRED)
+ 
+-set(ASCEND_COMPUTE_UNIT ascend910b)
++set(ASCEND_COMPUTE_UNIT ascend910_93)
+ set(package_name custom)
+ 
+ npu_op_package(${package_name}
+diff -ru /home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/workspace/code/op_host/mhc_expand.cpp /tmp/mhc_expand_a3_validation/source/op_host/mhc_expand.cpp
+--- /home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/workspace/code/op_host/mhc_expand.cpp	2026-08-21 14:30:28.400199790 +0000
++++ /tmp/mhc_expand_a3_validation/source/op_host/mhc_expand.cpp	2026-08-21 14:30:47.520199790 +0000
+@@ -220,7 +220,7 @@
+             this->SetInferShape(ge::InferShape).SetInferDataType(ge::InferDataType);
+             this->AICore()
+                 .SetTiling(optiling::TilingFunc)
+-                .AddConfig("ascend910b");
++                .AddConfig("ascend910_93");
+         }
+     };
+     OP_ADD(MhcExpand);
+A3_ADAPTATION_SCOPE_PASS
+-- The C compiler identification is GNU 10.3.1
+-- The CXX compiler identification is GNU 10.3.1
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- set package config: INSTALL_PATH;/tmp/mhc_expand_a3_validation/build
+-- Opbuild generating sources
+-- Opbuild generating sources - done
+INFO target name: cust_optiling
+INFO target name: cust_opapi
+INFO target name: ascendc_kernels
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /tmp/mhc_expand_a3_validation/build
+[ 25%] Building CXX object op_host/CMakeFiles/cust_optiling.dir/mhc_expand.cpp.o
+[ 50%] Generating ../autogen/copy_kernel_src.timestamp
+[ 50%] Built target ascendc_kernels_copy_kernel_srcs
+[ 75%] Generating ascendc_kernels/tbe/op_info_cfg/ai_core/ascend910_93/aic-ascend910_93-ops-info.json
+
+
+==============check valid for ops info start==============
+==============check valid for ops info end================
+
+
+Compile op info cfg successfully.
+[ 75%] Built target ascendc_kernels_ops_info_gen_ascend910_93
+[ 75%] Built target cust_optiling
+[100%] Linking CXX shared library libcust_opmaster_rt2.0.so
+[100%] Built target custom_ascendc_cust_optiling
+[ascend910_93] Generating MhcExpand_3058266aa7f1f45d457dbde7c09d5333 ...
+[ascend910_93] Generating MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240 ...
+Opc tool start working now, please wait for a moment.
+[ascend910_93] Generating MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240 Done
+Opc tool start working now, please wait for a moment.
+[ascend910_93] Generating MhcExpand_3058266aa7f1f45d457dbde7c09d5333 Done
+[100%] Built target MhcExpand_ascend910_93
+[100%] Built target ascendc_kernels_ascendc_bin_ascend910_93_gen_ops_config
+[100%] Built target binary
+grep: /home/liufujiang/ascend-envs/cann-8.5.0-a3/cann-8.5.0/toolkit/version.info: No such file or directory
+[ 12%] Generating scripts/install.sh, scripts/upgrade.sh
+[ 12%] Built target gen_version_info
+Consolidate compiler generated dependencies of target cust_optiling
+[ 12%] Built target modify_vendor
+[ 25%] Built target cust_optiling
+[ 37%] Building CXX object op_host/CMakeFiles/cust_opapi.dir/__/autogen/aclnn_mhc_expand.cpp.o
+[ 50%] Built target ascendc_kernels_copy_kernel_srcs
+[ 62%] Generating ascendc_kernels/tbe/op_info_cfg/ai_core/npu_supported_ops.json
+/tmp/mhc_expand_a3_validation/build/autogen /tmp/mhc_expand_a3_validation/build/op_kernel/ascendc_kernels/tbe/op_info_cfg/ai_core
+[INFO] Succed generated /tmp/mhc_expand_a3_validation/build/op_kernel/ascendc_kernels/tbe/op_info_cfg/ai_core/npu_supported_ops.json
+[ 62%] Built target custom_npu_supported_ops
+[ 75%] Built target custom_ascendc_cust_optiling
+[ 87%] Built target ascendc_kernels_ops_info_gen_ascend910_93
+[ 87%] Built target optiling_compat
+[ 87%] Built target cust_opapi
+[100%] Linking CXX shared library libcust_opapi.so
+[100%] Built target custom_ascendc_cust_opapi
+Run CPack packaging tool...
+CPack: Create package using External
+CPack: Install projects
+CPack: - Run preinstall target for: custom_project
+CPack: - Install project: custom_project []
+CPack: Create package
+
+About to compress 1304 KB of data...
+Adding files to archive named "custom_opp_openEuler_aarch64.run"...
+./help.info
+./install.sh
+./packages/vendors/custom/framework/plugin/npu_supported_ops.json
+./packages/vendors/custom/op_api/include/aclnn_mhc_expand.h
+./packages/vendors/custom/op_api/lib/libcust_opapi.so
+./packages/vendors/custom/op_impl/ai_core/tbe/config/ascend910_93/aic-ascend910_93-ops-info.json
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/mhc_expand.cpp
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/mhc_expand.py
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/mhc_expand_tiling.h
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/tiling_key_mhc_expand.h
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910_93/mhc_expand/MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240.json
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910_93/mhc_expand/MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240.o
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910_93/mhc_expand/MhcExpand_3058266aa7f1f45d457dbde7c09d5333.json
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910_93/mhc_expand/MhcExpand_3058266aa7f1f45d457dbde7c09d5333.o
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/config/ascend910_93/binary_info_config.json
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/config/ascend910_93/mhc_expand.json
+./packages/vendors/custom/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64/libcust_opmaster_rt2.0.so
+./packages/vendors/custom/op_impl/ai_core/tbe/op_tiling/liboptiling.so
+./packages/vendors/custom/version.info
+./uninstall.sh
+./upgrade.sh
+CRC: 444975236
+SHA256: 73a2d61b558ef770941cb27e0a492e3bc20df325c7d48ce857f42c3ddd4b8682
+Skipping md5sum at user request
+
+Self-extractable archive "custom_opp_openEuler_aarch64.run" successfully created.
+Copy /tmp/mhc_expand_a3_validation/build/_CPack_Packages/Linux/External/custom_opp_openEuler_aarch64.run/custom_opp_openEuler_aarch64.run to /tmp/mhc_expand_a3_validation/build/
+CPack: - package: /tmp/mhc_expand_a3_validation/build/custom_opp_openEuler_aarch64.run.json generated.
+CPack: - package: /tmp/mhc_expand_a3_validation/build/custom_opp_openEuler_aarch64.run generated.
+[ops_custom] [2026-08-21 14:30:58] [INFO] create /tmp/mhc_expand_a3_validation/install/vendors.
+[ops_custom] [2026-08-21 14:30:58] [INFO] create /tmp/mhc_expand_a3_validation/install/vendors/custom.
+[ops_custom] [2026-08-21 14:30:58] [INFO] upgrade framework
+[ops_custom] [2026-08-21 14:30:58] [INFO] create /tmp/mhc_expand_a3_validation/install/vendors/custom/framework.
+[ops_custom] [2026-08-21 14:30:58] [INFO] copy new ops framework files ......
+[ops_custom] [2026-08-21 14:30:58] [INFO] upgrade op proto
+[ops_custom] [2026-08-21 14:30:58] [INFO] no need to upgrade ops op_proto files
+[ops_custom] [2026-08-21 14:30:58] [INFO] upgrade op impl
+[ops_custom] [2026-08-21 14:30:58] [INFO] create /tmp/mhc_expand_a3_validation/install/vendors/custom/op_impl.
+[ops_custom] [2026-08-21 14:30:58] [INFO] copy new ops op_impl files ......
+[ops_custom] [2026-08-21 14:30:58] [INFO] upgrade op api
+[ops_custom] [2026-08-21 14:30:58] [INFO] create /tmp/mhc_expand_a3_validation/install/vendors/custom/op_api.
+[ops_custom] [2026-08-21 14:30:58] [INFO] copy new ops op_api files ......
+[ops_custom] [2026-08-21 14:30:58] [INFO] upgrade uninstall
+[ops_custom] [2026-08-21 14:30:58] [INFO] copy new uninstall.sh files ......
+[ops_custom] [2026-08-21 14:30:58] [INFO] upgrade version.info
+[ops_custom] [2026-08-21 14:30:58] [INFO] copy new version.info files ......
+[ops_custom] [2026-08-21 14:30:58] [INFO] no need to upgrade custom.proto files
+[ops_custom] [2026-08-21 14:30:58] [INFO] using requirements: when custom module install finished or before you run the custom module, execute the command [ source /tmp/mhc_expand_a3_validation/install/vendors/custom/bin/set_env.bash ] to set the environment path
+SUCCESS
+CUSTOM_ACLNN_LIBRARY_LOAD_PASS=/tmp/mhc_expand_a3_validation/install/vendors/custom/op_api/lib/libcust_opapi.so
+CORRECTNESS_PHASE=forward_fp16_smoke
+RUNTIME_INIT_BEGIN monotonic_s=4601838.846011470
+ACL_INIT_BEGIN monotonic_s=4601838.858214110
+ACL_INIT_END monotonic_s=4601838.868724010 elapsed_ms=10.466 rc=0
+ACLRT_SET_DEVICE_BEGIN monotonic_s=4601838.868746220
+ACLRT_SET_DEVICE_END monotonic_s=4601839.285673270 elapsed_ms=416.875 rc=0
+ACLRT_CREATE_CONTEXT_BEGIN monotonic_s=4601839.285734930
+ACLRT_CREATE_CONTEXT_END monotonic_s=4601839.286723240 elapsed_ms=0.964 rc=0
+ACLRT_CREATE_STREAM_BEGIN monotonic_s=4601839.286749160
+ACLRT_CREATE_STREAM_END monotonic_s=4601839.287102510 elapsed_ms=0.340 rc=0
+RUNTIME_INIT_END monotonic_s=4601839.287115310 device=4
+CUSTOM_LIBRARY_LOAD_BEGIN monotonic_s=4601839.287130250
+CUSTOM_LIBRARY_LOAD_END monotonic_s=4601839.320884550 elapsed_ms=33.604 library=/tmp/mhc_expand_a3_validation/install/vendors/custom/op_api/lib/libcust_opapi.so
+CASE_BEGIN name=forward_fp16_smoke dtype=fp16 S=1 D=16 m=2 backward=false
+INPUT_ALLOCATION_BEGIN monotonic_s=4601839.321029890
+INPUT_ALLOCATION_END monotonic_s=4601839.321243720 input_bytes=32 output_bytes=64
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601839.321257850
+ACL_CREATE_TENSOR_END monotonic_s=4601839.321414360
+GET_WORKSPACE_BEGIN monotonic_s=4601839.321425860
+GET_WORKSPACE_END monotonic_s=4601839.900437900 elapsed_ms=578.915 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601839.900502060
+KERNEL_LAUNCH_END monotonic_s=4601839.901216820 elapsed_ms=0.691 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601839.901236500
+SYNCHRONIZE_END monotonic_s=4601839.901279020 elapsed_ms=0.032 rc=0
+COPY_BACK_BEGIN monotonic_s=4601839.901288450
+COPY_BACK_END monotonic_s=4601839.901520860 elapsed_ms=0.221
+input=[[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0]]
+actual=[[[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0], [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0]]]
+expected=[[[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0], [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0]]]
+CASE_RESULT {"backward": false, "d": 16, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_fp16_smoke", "s": 1}
+PHASE_PASS [{"backward": false, "d": 16, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_fp16_smoke", "s": 1}]
+ACLRT_DESTROY_STREAM_BEGIN monotonic_s=4601839.902109750
+ACLRT_DESTROY_STREAM_END monotonic_s=4601839.902812980 elapsed_ms=0.688 rc=0
+ACLRT_DESTROY_CONTEXT_BEGIN monotonic_s=4601839.902829480
+ACLRT_DESTROY_CONTEXT_END monotonic_s=4601839.903693160 elapsed_ms=0.850 rc=0
+ACLRT_RESET_DEVICE_BEGIN monotonic_s=4601839.903708990
+ACLRT_RESET_DEVICE_END monotonic_s=4601840.124164660 elapsed_ms=220.416 rc=0
+ACL_FINALIZE_BEGIN monotonic_s=4601840.124203070
+ACL_FINALIZE_END monotonic_s=4601840.545880120 elapsed_ms=421.647 rc=0
+CORRECTNESS_PHASE=forward_bf16_smoke
+RUNTIME_INIT_BEGIN monotonic_s=4601841.919961700
+ACL_INIT_BEGIN monotonic_s=4601841.932739120
+ACL_INIT_END monotonic_s=4601841.943413240 elapsed_ms=10.624 rc=0
+ACLRT_SET_DEVICE_BEGIN monotonic_s=4601841.943437570
+ACLRT_SET_DEVICE_END monotonic_s=4601842.366849490 elapsed_ms=423.362 rc=0
+ACLRT_CREATE_CONTEXT_BEGIN monotonic_s=4601842.366911470
+ACLRT_CREATE_CONTEXT_END monotonic_s=4601842.368127190 elapsed_ms=1.195 rc=0
+ACLRT_CREATE_STREAM_BEGIN monotonic_s=4601842.368150520
+ACLRT_CREATE_STREAM_END monotonic_s=4601842.368501240 elapsed_ms=0.338 rc=0
+RUNTIME_INIT_END monotonic_s=4601842.368513900 device=4
+CUSTOM_LIBRARY_LOAD_BEGIN monotonic_s=4601842.368528780
+CUSTOM_LIBRARY_LOAD_END monotonic_s=4601842.401100520 elapsed_ms=32.423 library=/tmp/mhc_expand_a3_validation/install/vendors/custom/op_api/lib/libcust_opapi.so
+CASE_BEGIN name=forward_bf16_smoke dtype=bf16 S=1 D=16 m=2 backward=false
+INPUT_ALLOCATION_BEGIN monotonic_s=4601842.401295170
+INPUT_ALLOCATION_END monotonic_s=4601842.401491390 input_bytes=32 output_bytes=64
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601842.401503220
+ACL_CREATE_TENSOR_END monotonic_s=4601842.401652150
+GET_WORKSPACE_BEGIN monotonic_s=4601842.401662740
+GET_WORKSPACE_END monotonic_s=4601842.977453390 elapsed_ms=575.702 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601842.977518110
+KERNEL_LAUNCH_END monotonic_s=4601842.977999470 elapsed_ms=0.463 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601842.978016590
+SYNCHRONIZE_END monotonic_s=4601842.978056750 elapsed_ms=0.030 rc=0
+COPY_BACK_BEGIN monotonic_s=4601842.978065170
+COPY_BACK_END monotonic_s=4601842.978244650 elapsed_ms=0.169
+input=[[0, 16256, 16384, 16448, 16512, 16544, 16576, 16608, 16640, 16656, 16672, 16688, 16704, 16720, 16736, 16752]]
+actual=[[[0, 16256, 16384, 16448, 16512, 16544, 16576, 16608, 16640, 16656, 16672, 16688, 16704, 16720, 16736, 16752], [0, 16256, 16384, 16448, 16512, 16544, 16576, 16608, 16640, 16656, 16672, 16688, 16704, 16720, 16736, 16752]]]
+expected=[[[0, 16256, 16384, 16448, 16512, 16544, 16576, 16608, 16640, 16656, 16672, 16688, 16704, 16720, 16736, 16752], [0, 16256, 16384, 16448, 16512, 16544, 16576, 16608, 16640, 16656, 16672, 16688, 16704, 16720, 16736, 16752]]]
+CASE_RESULT {"backward": false, "d": 16, "dtype": "bf16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_bf16_smoke", "s": 1}
+PHASE_PASS [{"backward": false, "d": 16, "dtype": "bf16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_bf16_smoke", "s": 1}]
+ACLRT_DESTROY_STREAM_BEGIN monotonic_s=4601842.978801540
+ACLRT_DESTROY_STREAM_END monotonic_s=4601842.979583030 elapsed_ms=0.767 rc=0
+ACLRT_DESTROY_CONTEXT_BEGIN monotonic_s=4601842.979600230
+ACLRT_DESTROY_CONTEXT_END monotonic_s=4601842.980496030 elapsed_ms=0.883 rc=0
+ACLRT_RESET_DEVICE_BEGIN monotonic_s=4601842.980512440
+ACLRT_RESET_DEVICE_END monotonic_s=4601843.201850380 elapsed_ms=221.302 rc=0
+ACL_FINALIZE_BEGIN monotonic_s=4601843.201883030
+ACL_FINALIZE_END monotonic_s=4601843.546362360 elapsed_ms=344.437 rc=0
+CORRECTNESS_PHASE=forward_boundary
+RUNTIME_INIT_BEGIN monotonic_s=4601844.999950650
+ACL_INIT_BEGIN monotonic_s=4601845.013032470
+ACL_INIT_END monotonic_s=4601845.023990870 elapsed_ms=10.905 rc=0
+ACLRT_SET_DEVICE_BEGIN monotonic_s=4601845.024035490
+ACLRT_SET_DEVICE_END monotonic_s=4601845.460140200 elapsed_ms=436.053 rc=0
+ACLRT_CREATE_CONTEXT_BEGIN monotonic_s=4601845.460202330
+ACLRT_CREATE_CONTEXT_END monotonic_s=4601845.461053360 elapsed_ms=0.830 rc=0
+ACLRT_CREATE_STREAM_BEGIN monotonic_s=4601845.461076250
+ACLRT_CREATE_STREAM_END monotonic_s=4601845.461438400 elapsed_ms=0.349 rc=0
+RUNTIME_INIT_END monotonic_s=4601845.461451150 device=4
+CUSTOM_LIBRARY_LOAD_BEGIN monotonic_s=4601845.461467380
+CUSTOM_LIBRARY_LOAD_END monotonic_s=4601845.494224310 elapsed_ms=32.601 library=/tmp/mhc_expand_a3_validation/install/vendors/custom/op_api/lib/libcust_opapi.so
+CASE_BEGIN name=forward_fp16_d1 dtype=fp16 S=1 D=1 m=2 backward=false
+INPUT_ALLOCATION_BEGIN monotonic_s=4601845.494415860
+INPUT_ALLOCATION_END monotonic_s=4601845.494640960 input_bytes=2 output_bytes=4
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601845.494656190
+ACL_CREATE_TENSOR_END monotonic_s=4601845.494821910
+GET_WORKSPACE_BEGIN monotonic_s=4601845.494837110
+GET_WORKSPACE_END monotonic_s=4601846.083134960 elapsed_ms=588.203 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601846.083208100
+KERNEL_LAUNCH_END monotonic_s=4601846.083912850 elapsed_ms=0.682 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601846.083932050
+SYNCHRONIZE_END monotonic_s=4601846.083968290 elapsed_ms=0.026 rc=0
+COPY_BACK_BEGIN monotonic_s=4601846.083977120
+COPY_BACK_END monotonic_s=4601846.084286510 elapsed_ms=0.298
+input=[[-15.0]]
+actual=[[[-15.0], [-15.0]]]
+expected=[[[-15.0], [-15.0]]]
+CASE_RESULT {"backward": false, "d": 1, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_fp16_d1", "s": 1}
+CASE_BEGIN name=forward_fp16_d17 dtype=fp16 S=3 D=17 m=2 backward=false
+INPUT_ALLOCATION_BEGIN monotonic_s=4601846.084961390
+INPUT_ALLOCATION_END monotonic_s=4601846.085069300 input_bytes=102 output_bytes=204
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601846.085078830
+ACL_CREATE_TENSOR_END monotonic_s=4601846.085135910
+GET_WORKSPACE_BEGIN monotonic_s=4601846.085144530
+GET_WORKSPACE_END monotonic_s=4601846.085215870 elapsed_ms=0.059 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601846.085225640
+KERNEL_LAUNCH_END monotonic_s=4601846.085261820 elapsed_ms=0.027 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601846.085269640
+SYNCHRONIZE_END monotonic_s=4601846.085288220 elapsed_ms=0.010 rc=0
+COPY_BACK_BEGIN monotonic_s=4601846.085295020
+COPY_BACK_END monotonic_s=4601846.085343070 elapsed_ms=0.040
+CASE_RESULT {"backward": false, "d": 17, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_fp16_d17", "s": 3}
+CASE_BEGIN name=forward_bf16_d33 dtype=bf16 S=3 D=33 m=4 backward=false
+INPUT_ALLOCATION_BEGIN monotonic_s=4601846.085594950
+INPUT_ALLOCATION_END monotonic_s=4601846.085675070 input_bytes=198 output_bytes=792
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601846.085683970
+ACL_CREATE_TENSOR_END monotonic_s=4601846.085716000
+GET_WORKSPACE_BEGIN monotonic_s=4601846.085724340
+GET_WORKSPACE_END monotonic_s=4601846.086047020 elapsed_ms=0.307 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601846.086059790
+KERNEL_LAUNCH_END monotonic_s=4601846.086154770 elapsed_ms=0.084 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601846.086164200
+SYNCHRONIZE_END monotonic_s=4601846.086181720 elapsed_ms=0.009 rc=0
+COPY_BACK_BEGIN monotonic_s=4601846.086188250
+COPY_BACK_END monotonic_s=4601846.086233270 elapsed_ms=0.037
+CASE_RESULT {"backward": false, "d": 33, "dtype": "bf16", "exact_equal": true, "m": 4, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_bf16_d33", "s": 3}
+CASE_BEGIN name=forward_bf16_d129 dtype=bf16 S=5 D=129 m=4 backward=false
+INPUT_ALLOCATION_BEGIN monotonic_s=4601846.086456450
+INPUT_ALLOCATION_END monotonic_s=4601846.086525000 input_bytes=1290 output_bytes=5160
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601846.086533710
+ACL_CREATE_TENSOR_END monotonic_s=4601846.086565600
+GET_WORKSPACE_BEGIN monotonic_s=4601846.086573220
+GET_WORKSPACE_END monotonic_s=4601846.086624040 elapsed_ms=0.040 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601846.086632930
+KERNEL_LAUNCH_END monotonic_s=4601846.086661500 elapsed_ms=0.020 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601846.086668730
+SYNCHRONIZE_END monotonic_s=4601846.086694550 elapsed_ms=0.018 rc=0
+COPY_BACK_BEGIN monotonic_s=4601846.086701180
+COPY_BACK_END monotonic_s=4601846.086746820 elapsed_ms=0.038
+CASE_RESULT {"backward": false, "d": 129, "dtype": "bf16", "exact_equal": true, "m": 4, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_bf16_d129", "s": 5}
+PHASE_PASS [{"backward": false, "d": 1, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_fp16_d1", "s": 1}, {"backward": false, "d": 17, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_fp16_d17", "s": 3}, {"backward": false, "d": 33, "dtype": "bf16", "exact_equal": true, "m": 4, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_bf16_d33", "s": 3}, {"backward": false, "d": 129, "dtype": "bf16", "exact_equal": true, "m": 4, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "forward_bf16_d129", "s": 5}]
+ACLRT_DESTROY_STREAM_BEGIN monotonic_s=4601846.086898400
+ACLRT_DESTROY_STREAM_END monotonic_s=4601846.087639120 elapsed_ms=0.729 rc=0
+ACLRT_DESTROY_CONTEXT_BEGIN monotonic_s=4601846.087653240
+ACLRT_DESTROY_CONTEXT_END monotonic_s=4601846.088241440 elapsed_ms=0.576 rc=0
+ACLRT_RESET_DEVICE_BEGIN monotonic_s=4601846.088255540
+ACLRT_RESET_DEVICE_END monotonic_s=4601846.386003980 elapsed_ms=297.660 rc=0
+ACL_FINALIZE_BEGIN monotonic_s=4601846.386089070
+ACL_FINALIZE_END monotonic_s=4601846.546733450 elapsed_ms=160.568 rc=0
+CORRECTNESS_PHASE=backward_fp16_smoke
+RUNTIME_INIT_BEGIN monotonic_s=4601848.063522680
+ACL_INIT_BEGIN monotonic_s=4601848.076477600
+ACL_INIT_END monotonic_s=4601848.087303760 elapsed_ms=10.779 rc=0
+ACLRT_SET_DEVICE_BEGIN monotonic_s=4601848.087328050
+ACLRT_SET_DEVICE_END monotonic_s=4601848.516478940 elapsed_ms=429.101 rc=0
+ACLRT_CREATE_CONTEXT_BEGIN monotonic_s=4601848.516518500
+ACLRT_CREATE_CONTEXT_END monotonic_s=4601848.517633770 elapsed_ms=1.066 rc=0
+ACLRT_CREATE_STREAM_BEGIN monotonic_s=4601848.517687760
+ACLRT_CREATE_STREAM_END monotonic_s=4601848.518204570 elapsed_ms=0.499 rc=0
+RUNTIME_INIT_END monotonic_s=4601848.518219230 device=4
+CUSTOM_LIBRARY_LOAD_BEGIN monotonic_s=4601848.518234450
+CUSTOM_LIBRARY_LOAD_END monotonic_s=4601848.551756900 elapsed_ms=33.380 library=/tmp/mhc_expand_a3_validation/install/vendors/custom/op_api/lib/libcust_opapi.so
+CASE_BEGIN name=backward_fp16_smoke dtype=fp16 S=1 D=16 m=2 backward=true
+INPUT_ALLOCATION_BEGIN monotonic_s=4601848.551954320
+INPUT_ALLOCATION_END monotonic_s=4601848.552173290 input_bytes=64 output_bytes=32
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601848.552185900
+ACL_CREATE_TENSOR_END monotonic_s=4601848.552336900
+GET_WORKSPACE_BEGIN monotonic_s=4601848.552348780
+GET_WORKSPACE_END monotonic_s=4601849.123531670 elapsed_ms=571.101 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601849.123596880
+KERNEL_LAUNCH_END monotonic_s=4601849.124367410 elapsed_ms=0.745 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601849.124387930
+SYNCHRONIZE_END monotonic_s=4601849.124430350 elapsed_ms=0.033 rc=0
+COPY_BACK_BEGIN monotonic_s=4601849.124440220
+COPY_BACK_END monotonic_s=4601849.124684150 elapsed_ms=0.234
+input=[[[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]]]
+actual=[[3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]]
+expected=[[3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]]
+CASE_RESULT {"backward": true, "d": 16, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_fp16_smoke", "s": 1}
+PHASE_PASS [{"backward": true, "d": 16, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_fp16_smoke", "s": 1}]
+ACLRT_DESTROY_STREAM_BEGIN monotonic_s=4601849.125259230
+ACLRT_DESTROY_STREAM_END monotonic_s=4601849.126180090 elapsed_ms=0.906 rc=0
+ACLRT_DESTROY_CONTEXT_BEGIN monotonic_s=4601849.126196270
+ACLRT_DESTROY_CONTEXT_END monotonic_s=4601849.127143100 elapsed_ms=0.934 rc=0
+ACLRT_RESET_DEVICE_BEGIN monotonic_s=4601849.127159410
+ACLRT_RESET_DEVICE_END monotonic_s=4601849.353037620 elapsed_ms=225.839 rc=0
+ACL_FINALIZE_BEGIN monotonic_s=4601849.353074430
+ACL_FINALIZE_END monotonic_s=4601849.547059030 elapsed_ms=193.961 rc=0
+CORRECTNESS_PHASE=backward_bf16_smoke
+RUNTIME_INIT_BEGIN monotonic_s=4601851.141743610
+ACL_INIT_BEGIN monotonic_s=4601851.153805480
+ACL_INIT_END monotonic_s=4601851.164355190 elapsed_ms=10.507 rc=0
+ACLRT_SET_DEVICE_BEGIN monotonic_s=4601851.164377950
+ACLRT_SET_DEVICE_END monotonic_s=4601851.597343420 elapsed_ms=432.889 rc=0
+ACLRT_CREATE_CONTEXT_BEGIN monotonic_s=4601851.597417640
+ACLRT_CREATE_CONTEXT_END monotonic_s=4601851.598378980 elapsed_ms=0.929 rc=0
+ACLRT_CREATE_STREAM_BEGIN monotonic_s=4601851.598404140
+ACLRT_CREATE_STREAM_END monotonic_s=4601851.598767930 elapsed_ms=0.349 rc=0
+RUNTIME_INIT_END monotonic_s=4601851.598781370 device=4
+CUSTOM_LIBRARY_LOAD_BEGIN monotonic_s=4601851.598796650
+CUSTOM_LIBRARY_LOAD_END monotonic_s=4601851.628475750 elapsed_ms=29.512 library=/tmp/mhc_expand_a3_validation/install/vendors/custom/op_api/lib/libcust_opapi.so
+CASE_BEGIN name=backward_bf16_smoke dtype=bf16 S=1 D=16 m=2 backward=true
+INPUT_ALLOCATION_BEGIN monotonic_s=4601851.628798890
+INPUT_ALLOCATION_END monotonic_s=4601851.629020370 input_bytes=64 output_bytes=32
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601851.629033230
+ACL_CREATE_TENSOR_END monotonic_s=4601851.629185960
+GET_WORKSPACE_BEGIN monotonic_s=4601851.629196930
+GET_WORKSPACE_END monotonic_s=4601852.162811560 elapsed_ms=533.510 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601852.162880910
+KERNEL_LAUNCH_END monotonic_s=4601852.163553900 elapsed_ms=0.645 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601852.163577530
+SYNCHRONIZE_END monotonic_s=4601852.163626450 elapsed_ms=0.039 rc=0
+COPY_BACK_BEGIN monotonic_s=4601852.163634820
+COPY_BACK_END monotonic_s=4601852.163828040 elapsed_ms=0.183
+input=[[[16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256, 16256], [16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384, 16384]]]
+actual=[[16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448]]
+expected=[[16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448, 16448]]
+CASE_RESULT {"backward": true, "d": 16, "dtype": "bf16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_bf16_smoke", "s": 1}
+PHASE_PASS [{"backward": true, "d": 16, "dtype": "bf16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_bf16_smoke", "s": 1}]
+ACLRT_DESTROY_STREAM_BEGIN monotonic_s=4601852.164395470
+ACLRT_DESTROY_STREAM_END monotonic_s=4601852.165092860 elapsed_ms=0.681 rc=0
+ACLRT_DESTROY_CONTEXT_BEGIN monotonic_s=4601852.165109650
+ACLRT_DESTROY_CONTEXT_END monotonic_s=4601852.165917590 elapsed_ms=0.794 rc=0
+ACLRT_RESET_DEVICE_BEGIN monotonic_s=4601852.165933350
+ACLRT_RESET_DEVICE_END monotonic_s=4601852.434168230 elapsed_ms=268.159 rc=0
+ACL_FINALIZE_BEGIN monotonic_s=4601852.434228490
+ACL_FINALIZE_END monotonic_s=4601852.547431890 elapsed_ms=113.168 rc=0
+CORRECTNESS_PHASE=backward_boundary
+RUNTIME_INIT_BEGIN monotonic_s=4601854.220639340
+ACL_INIT_BEGIN monotonic_s=4601854.234143500
+ACL_INIT_END monotonic_s=4601854.244897110 elapsed_ms=10.709 rc=0
+ACLRT_SET_DEVICE_BEGIN monotonic_s=4601854.244922730
+ACLRT_SET_DEVICE_END monotonic_s=4601854.666689510 elapsed_ms=421.717 rc=0
+ACLRT_CREATE_CONTEXT_BEGIN monotonic_s=4601854.666749030
+ACLRT_CREATE_CONTEXT_END monotonic_s=4601854.667753100 elapsed_ms=0.983 rc=0
+ACLRT_CREATE_STREAM_BEGIN monotonic_s=4601854.667775270
+ACLRT_CREATE_STREAM_END monotonic_s=4601854.668135310 elapsed_ms=0.347 rc=0
+RUNTIME_INIT_END monotonic_s=4601854.668148080 device=4
+CUSTOM_LIBRARY_LOAD_BEGIN monotonic_s=4601854.668164040
+CUSTOM_LIBRARY_LOAD_END monotonic_s=4601854.701645650 elapsed_ms=33.332 library=/tmp/mhc_expand_a3_validation/install/vendors/custom/op_api/lib/libcust_opapi.so
+CASE_BEGIN name=backward_fp16_d1 dtype=fp16 S=1 D=1 m=2 backward=true
+INPUT_ALLOCATION_BEGIN monotonic_s=4601854.701864340
+INPUT_ALLOCATION_END monotonic_s=4601854.702071880 input_bytes=4 output_bytes=2
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601854.702082870
+ACL_CREATE_TENSOR_END monotonic_s=4601854.702233250
+GET_WORKSPACE_BEGIN monotonic_s=4601854.702244030
+GET_WORKSPACE_END monotonic_s=4601855.277939860 elapsed_ms=575.602 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601855.278008990
+KERNEL_LAUNCH_END monotonic_s=4601855.278749960 elapsed_ms=0.719 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601855.278769940
+SYNCHRONIZE_END monotonic_s=4601855.278811600 elapsed_ms=0.032 rc=0
+COPY_BACK_BEGIN monotonic_s=4601855.278820190
+COPY_BACK_END monotonic_s=4601855.279031450 elapsed_ms=0.201
+input=[[[-0.75], [-0.5]]]
+actual=[[-1.25]]
+expected=[[-1.25]]
+CASE_RESULT {"backward": true, "d": 1, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_fp16_d1", "s": 1}
+CASE_BEGIN name=backward_fp16_d17 dtype=fp16 S=3 D=17 m=2 backward=true
+INPUT_ALLOCATION_BEGIN monotonic_s=4601855.279602630
+INPUT_ALLOCATION_END monotonic_s=4601855.279718350 input_bytes=204 output_bytes=102
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601855.279728410
+ACL_CREATE_TENSOR_END monotonic_s=4601855.279802990
+GET_WORKSPACE_BEGIN monotonic_s=4601855.279812020
+GET_WORKSPACE_END monotonic_s=4601855.279886910 elapsed_ms=0.062 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601855.279897040
+KERNEL_LAUNCH_END monotonic_s=4601855.279939840 elapsed_ms=0.034 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601855.279947270
+SYNCHRONIZE_END monotonic_s=4601855.279969260 elapsed_ms=0.014 rc=0
+COPY_BACK_BEGIN monotonic_s=4601855.279976200
+COPY_BACK_END monotonic_s=4601855.280038610 elapsed_ms=0.054
+input=[[[-0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25], [0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5]], [[0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5], [-0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25]], [[0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75], [-0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0.0]]]
+actual=[[-0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25], [0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25], [0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75]]
+expected=[[-0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25], [0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25], [0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75, -0.25, 0.25, 0.75, -0.5, 0.0, 0.5, -0.75]]
+CASE_RESULT {"backward": true, "d": 17, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_fp16_d17", "s": 3}
+CASE_BEGIN name=backward_bf16_d33 dtype=bf16 S=3 D=33 m=4 backward=true
+INPUT_ALLOCATION_BEGIN monotonic_s=4601855.280432440
+INPUT_ALLOCATION_END monotonic_s=4601855.280509250 input_bytes=792 output_bytes=198
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601855.280517820
+ACL_CREATE_TENSOR_END monotonic_s=4601855.280552330
+GET_WORKSPACE_BEGIN monotonic_s=4601855.280560060
+GET_WORKSPACE_END monotonic_s=4601855.280895260 elapsed_ms=0.317 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601855.280907790
+KERNEL_LAUNCH_END monotonic_s=4601855.281012160 elapsed_ms=0.094 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601855.281021380
+SYNCHRONIZE_END monotonic_s=4601855.281043420 elapsed_ms=0.013 rc=0
+COPY_BACK_BEGIN monotonic_s=4601855.281050180
+COPY_BACK_END monotonic_s=4601855.281097740 elapsed_ms=0.039
+CASE_RESULT {"backward": true, "d": 33, "dtype": "bf16", "exact_equal": true, "m": 4, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_bf16_d33", "s": 3}
+CASE_BEGIN name=backward_bf16_d129 dtype=bf16 S=5 D=129 m=8 backward=true
+INPUT_ALLOCATION_BEGIN monotonic_s=4601855.281452210
+INPUT_ALLOCATION_END monotonic_s=4601855.281529160 input_bytes=10320 output_bytes=1290
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4601855.281538620
+ACL_CREATE_TENSOR_END monotonic_s=4601855.281572510
+GET_WORKSPACE_BEGIN monotonic_s=4601855.281580220
+GET_WORKSPACE_END monotonic_s=4601855.281636430 elapsed_ms=0.045 rc=0 workspace_size=0 executor_nonnull=True
+KERNEL_LAUNCH_BEGIN monotonic_s=4601855.281645000
+KERNEL_LAUNCH_END monotonic_s=4601855.281679530 elapsed_ms=0.026 rc=0
+SYNCHRONIZE_BEGIN monotonic_s=4601855.281687090
+SYNCHRONIZE_END monotonic_s=4601855.281706060 elapsed_ms=0.011 rc=0
+COPY_BACK_BEGIN monotonic_s=4601855.281712500
+COPY_BACK_END monotonic_s=4601855.281762830 elapsed_ms=0.042
+CASE_RESULT {"backward": true, "d": 129, "dtype": "bf16", "exact_equal": true, "m": 8, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_bf16_d129", "s": 5}
+PHASE_PASS [{"backward": true, "d": 1, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_fp16_d1", "s": 1}, {"backward": true, "d": 17, "dtype": "fp16", "exact_equal": true, "m": 2, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_fp16_d17", "s": 3}, {"backward": true, "d": 33, "dtype": "bf16", "exact_equal": true, "m": 4, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_bf16_d33", "s": 3}, {"backward": true, "d": 129, "dtype": "bf16", "exact_equal": true, "m": 8, "max_abs_error": 0.0, "max_rel_error": 0.0, "name": "backward_bf16_d129", "s": 5}]
+ACLRT_DESTROY_STREAM_BEGIN monotonic_s=4601855.281923120
+ACLRT_DESTROY_STREAM_END monotonic_s=4601855.282877020 elapsed_ms=0.941 rc=0
+ACLRT_DESTROY_CONTEXT_BEGIN monotonic_s=4601855.282891590
+ACLRT_DESTROY_CONTEXT_END monotonic_s=4601855.283805460 elapsed_ms=0.902 rc=0
+ACLRT_RESET_DEVICE_BEGIN monotonic_s=4601855.283819990
+ACLRT_RESET_DEVICE_END monotonic_s=4601855.503635170 elapsed_ms=219.746 rc=0
+ACL_FINALIZE_BEGIN monotonic_s=4601855.503698040
+ACL_FINALIZE_END monotonic_s=4601855.548084370 elapsed_ms=44.365 rc=0
+============================= test session starts ==============================
+platform linux -- Python 3.9.9, pytest-8.3.5, pluggy-1.6.0 -- /home/liufujiang/venvs/xingchenbei-cann85/bin/python
+cachedir: .pytest_cache
+rootdir: /home/liufujiang/workspace/xingchenbei
+collecting ... collected 44 items
+
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_m1_d1-1-1-1-fp16] PASSED [  2%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_m1_d1-1-1-1-bf16] PASSED [  4%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_smoke-1-16-2-fp16] PASSED [  6%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_smoke-1-16-2-bf16] PASSED [  9%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_d17-1-17-2-fp16] PASSED [ 11%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_m3_d31-3-31-3-bf16] PASSED [ 13%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_d32-3-32-4-fp16] PASSED [ 15%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_m5_d33-3-33-5-bf16] PASSED [ 18%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_m8_d129-7-129-8-fp16] PASSED [ 20%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_m8_d129-7-129-8-bf16] PASSED [ 22%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_published_small-64-256-2-fp16] PASSED [ 25%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_published_small-64-256-2-bf16] PASSED [ 27%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_nonaligned-127-513-4-fp16] PASSED [ 29%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_nonaligned-127-513-4-bf16] PASSED [ 31%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_m8_wide-256-7168-8-fp16] PASSED [ 34%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_m8_wide-256-7168-8-bf16] PASSED [ 36%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_fp16_published_medium-1024-4096-4-fp16] PASSED [ 38%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_forward[fwd_bf16_published_medium-1024-4096-4-bf16] PASSED [ 40%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_m1_d1-1-1-1-fp16] PASSED [ 43%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_m1_d1-1-1-1-bf16] PASSED [ 45%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_smoke-1-16-2-fp16] PASSED [ 47%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_smoke-1-16-2-bf16] PASSED [ 50%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_d17-1-17-2-fp16] PASSED [ 52%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_m3_d31-3-31-3-bf16] PASSED [ 54%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_d32-3-32-4-fp16] PASSED [ 56%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_m5_d33-3-33-5-bf16] PASSED [ 59%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_m8_d129-7-129-8-fp16] PASSED [ 61%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_m8_d129-7-129-8-bf16] PASSED [ 63%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_published_small-64-256-2-fp16] PASSED [ 65%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_published_small-64-256-2-bf16] PASSED [ 68%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_nonaligned-127-513-4-fp16] PASSED [ 70%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_nonaligned-127-513-4-bf16] PASSED [ 72%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_m1_medium-256-4096-1-fp16] PASSED [ 75%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_m1_medium-256-4096-1-bf16] FAILED [ 77%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_m8_wide-256-7168-8-fp16] PASSED [ 79%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_m8_wide-256-7168-8-bf16] PASSED [ 81%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_fp16_published_medium-1024-4096-4-fp16] PASSED [ 84%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_published_medium-1024-4096-4-bf16] PASSED [ 86%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_generated_api_uses_declared_mhc_mult_default_value PASSED [ 88%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_invalid_contract_is_rejected[shape0-out_shape0-2-True] PASSED [ 90%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_invalid_contract_is_rejected[shape1-out_shape1-2-False] PASSED [ 93%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_invalid_contract_is_rejected[shape2-out_shape2-2-True] PASSED [ 95%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_invalid_contract_is_rejected[shape3-out_shape3-3-True] PASSED [ 97%]
+tasks/mhc_expand/tests/test_mhc_expand.py::test_invalid_dtype_is_rejected PASSED [100%]
+
+=================================== FAILURES ===================================
+______________ test_backward[bwd_bf16_m1_medium-256-4096-1-bf16] _______________
+
+op = <test_mhc_expand.MhcExpandAclnn object at 0xfffee4a769d0>
+case_id = 'bwd_bf16_m1_medium', s = 256, d = 4096, m = 1, dtype = 'bf16'
+
+    @pytest.mark.parametrize("case_id,s,d,m,dtype", BACKWARD_CASES, ids=lambda value: str(value))
+    def test_backward(
+        op: MhcExpandAclnn, case_id: str, s: int, d: int, m: int, dtype: str
+    ) -> None:
+        source = np.random.default_rng(2).standard_normal((s, m, d), dtype=np.float32)
+        x = encode(source, dtype)
+        actual = op.run(x, (s, d), dtype, m, True)
+        expected = encode(decode(x, dtype).sum(axis=1, dtype=np.float32), dtype)
+>       assert np.array_equal(actual, expected), (
+            f"max_abs_error={np.max(np.abs(decode(actual, dtype) - decode(expected, dtype)))}"
+        )
+E       AssertionError: max_abs_error=0.0
+E       assert False
+E        +  where False = <function array_equal at 0xfffee560a570>(array([[16346, 48795, 48663, ..., 48912, 16274, 48976],\n       [16272, 48854, 48980, ..., 16237, 48731, 48519],\n       [15569, 15687, 16313, ..., 49068, 16313, 48731],\n       ...,\n       [49078, 16291, 49075, ..., 48915, 16413, 16179],\n       [16104, 48978, 48489, ..., 48973, 15378, 16284],\n       [49057, 48587, 49025, ..., 49064, 49168, 16068]], dtype=uint16), array([[16346, 48795, 48663, ..., 48912, 16274, 48976],\n       [16272, 48854, 48980, ..., 16237, 48731, 48519],\n       [15569, 15687, 16313, ..., 49068, 16313, 48731],\n       ...,\n       [49078, 16291, 49075, ..., 48915, 16413, 16179],\n       [16104, 48978, 48489, ..., 48973, 15378, 16284],\n       [49057, 48587, 49025, ..., 49064, 49168, 16068]], dtype=uint16))
+E        +    where <function array_equal at 0xfffee560a570> = np.array_equal
+
+tasks/mhc_expand/tests/test_mhc_expand.py:407: AssertionError
+=========================== short test summary info ============================
+FAILED tasks/mhc_expand/tests/test_mhc_expand.py::test_backward[bwd_bf16_m1_medium-256-4096-1-bf16]
+========================= 1 failed, 43 passed in 3.27s =========================

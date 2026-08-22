@@ -1,0 +1,21 @@
+/tmp/mhc-expand-a3-cann85.IrSuPR/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240.o
+/tmp/mhc-expand-a3-cann85.IrSuPR/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/MhcExpand_3058266aa7f1f45d457dbde7c09d5333.o
+/tmp/mhc-expand-a3-cann85.IrSuPR/vendors/custom/op_impl/ai_core/tbe/kernel/config/ascend910b/binary_info_config.json
+/tmp/mhc-expand-a3-cann85.IrSuPR/vendors/custom/op_impl/ai_core/tbe/kernel/config/ascend910b/mhc_expand.json
+cmake_minimum_required(VERSION 3.16.0)
+
+project(custom_project)
+
+find_package(ASC REQUIRED)
+
+set(ASCEND_COMPUTE_UNIT ascend910b)
+set(package_name custom)
+
+npu_op_package(${package_name}
+    TYPE RUN
+    CONFIG
+        INSTALL_PATH ${CMAKE_BINARY_DIR}
+)
+
+add_subdirectory(op_host)
+add_subdirectory(op_kernel)

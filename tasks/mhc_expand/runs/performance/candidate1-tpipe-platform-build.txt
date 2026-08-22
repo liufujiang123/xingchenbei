@@ -1,0 +1,115 @@
+PLATFORM 910B BUILD
+CANN_VERSION=8.5.0
+OPS_PACKAGE=Ascend-cann-910b-ops
+TARGET=ascend910b
+SOURCE=/home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/workspace/code
+BUILD_DIR=/tmp/mhc_expand_platform_910b/build
+-- The C compiler identification is GNU 10.3.1
+-- The CXX compiler identification is GNU 10.3.1
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- set package config: INSTALL_PATH;/tmp/mhc_expand_platform_910b/build
+-- Opbuild generating sources
+-- Opbuild generating sources - done
+INFO target name: cust_optiling
+INFO target name: cust_opapi
+INFO target name: ascendc_kernels
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /tmp/mhc_expand_platform_910b/build
+[ 25%] Building CXX object op_host/CMakeFiles/cust_optiling.dir/mhc_expand.cpp.o
+[ 50%] Generating ../autogen/copy_kernel_src.timestamp
+[ 50%] Built target ascendc_kernels_copy_kernel_srcs
+[ 75%] Generating ascendc_kernels/tbe/op_info_cfg/ai_core/ascend910b/aic-ascend910b-ops-info.json
+
+
+==============check valid for ops info start==============
+==============check valid for ops info end================
+
+
+Compile op info cfg successfully.
+[ 75%] Built target ascendc_kernels_ops_info_gen_ascend910b
+[ 75%] Built target cust_optiling
+[100%] Linking CXX shared library libcust_opmaster_rt2.0.so
+[100%] Built target custom_ascendc_cust_optiling
+[ascend910b] Generating MhcExpand_3058266aa7f1f45d457dbde7c09d5333 ...
+[ascend910b] Generating MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240 ...
+Opc tool start working now, please wait for a moment.
+[ascend910b] Generating MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240 Done
+Opc tool start working now, please wait for a moment.
+[ascend910b] Generating MhcExpand_3058266aa7f1f45d457dbde7c09d5333 Done
+[100%] Built target MhcExpand_ascend910b
+[100%] Built target ascendc_kernels_ascendc_bin_ascend910b_gen_ops_config
+[100%] Built target binary
+grep: /home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/toolkit/version.info: No such file or directory
+[ 12%] Generating scripts/install.sh, scripts/upgrade.sh
+[ 12%] Built target gen_version_info
+Consolidate compiler generated dependencies of target cust_optiling
+[ 12%] Built target modify_vendor
+[ 25%] Built target cust_optiling
+[ 37%] Building CXX object op_host/CMakeFiles/cust_opapi.dir/__/autogen/aclnn_mhc_expand.cpp.o
+[ 50%] Built target ascendc_kernels_copy_kernel_srcs
+[ 62%] Generating ascendc_kernels/tbe/op_info_cfg/ai_core/npu_supported_ops.json
+/tmp/mhc_expand_platform_910b/build/autogen /tmp/mhc_expand_platform_910b/build/op_kernel/ascendc_kernels/tbe/op_info_cfg/ai_core
+[INFO] Succed generated /tmp/mhc_expand_platform_910b/build/op_kernel/ascendc_kernels/tbe/op_info_cfg/ai_core/npu_supported_ops.json
+[ 62%] Built target custom_npu_supported_ops
+[ 75%] Built target custom_ascendc_cust_optiling
+[ 87%] Built target ascendc_kernels_ops_info_gen_ascend910b
+[ 87%] Built target optiling_compat
+[ 87%] Built target cust_opapi
+[100%] Linking CXX shared library libcust_opapi.so
+[100%] Built target custom_ascendc_cust_opapi
+Run CPack packaging tool...
+CPack: Create package using External
+CPack: Install projects
+CPack: - Run preinstall target for: custom_project
+CPack: - Install project: custom_project []
+CPack: Create package
+
+About to compress 1304 KB of data...
+Adding files to archive named "custom_opp_openEuler_aarch64.run"...
+./help.info
+./install.sh
+./packages/vendors/custom/framework/plugin/npu_supported_ops.json
+./packages/vendors/custom/op_api/include/aclnn_mhc_expand.h
+./packages/vendors/custom/op_api/lib/libcust_opapi.so
+./packages/vendors/custom/op_impl/ai_core/tbe/config/ascend910b/aic-ascend910b-ops-info.json
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/mhc_expand.cpp
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/mhc_expand.py
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/mhc_expand_tiling.h
+./packages/vendors/custom/op_impl/ai_core/tbe/custom_impl/dynamic/tiling_key_mhc_expand.h
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240.json
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/MhcExpand_2bc7e3aea9c70d4c9ddf23d85567b240.o
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/MhcExpand_3058266aa7f1f45d457dbde7c09d5333.json
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/MhcExpand_3058266aa7f1f45d457dbde7c09d5333.o
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/config/ascend910b/binary_info_config.json
+./packages/vendors/custom/op_impl/ai_core/tbe/kernel/config/ascend910b/mhc_expand.json
+./packages/vendors/custom/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64/libcust_opmaster_rt2.0.so
+./packages/vendors/custom/op_impl/ai_core/tbe/op_tiling/liboptiling.so
+./packages/vendors/custom/version.info
+./uninstall.sh
+./upgrade.sh
+CRC: 94066594
+SHA256: 8ea79f7413453adecbf127d7cd6144a1fc63c07204d18f5a9b38fb4e2a4c8339
+Skipping md5sum at user request
+
+Self-extractable archive "custom_opp_openEuler_aarch64.run" successfully created.
+Copy /tmp/mhc_expand_platform_910b/build/_CPack_Packages/Linux/External/custom_opp_openEuler_aarch64.run/custom_opp_openEuler_aarch64.run to /tmp/mhc_expand_platform_910b/build/
+CPack: - package: /tmp/mhc_expand_platform_910b/build/custom_opp_openEuler_aarch64.run.json generated.
+CPack: - package: /tmp/mhc_expand_platform_910b/build/custom_opp_openEuler_aarch64.run generated.
+BUILD_DIR=/tmp/mhc_expand_platform_910b/build
+PACKAGE=/tmp/mhc_expand_platform_910b/build/custom_opp_openEuler_aarch64.run
+HOST_BUILD=PASS
+FP16_KERNEL_BUILD=PASS
+BF16_KERNEL_BUILD=PASS
+ACLNN_LIBRARY_BUILD=PASS
+PACKAGE=/tmp/mhc_expand_platform_910b/build/custom_opp_openEuler_aarch64.run
+PLATFORM_910B_BUILD_PASS

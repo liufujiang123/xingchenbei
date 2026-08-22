@@ -1,0 +1,30 @@
+MhcExpand pre-validation ACL runtime probe under isolated CANN 8.5
+Date (UTC): 2026-08-19
+
+Historical note:
+  This was the first observation before the controlled CANN 8.5/9.0 and
+  multi-device A/B test. Its classification is superseded by
+  runs/acl-runtime-ab.txt.
+
+Command:
+  tasks/mhc_expand/scripts/with-cann85.sh env ASCEND_RT_VISIBLE_DEVICES=1 \
+    timeout 60s python tasks/mhc_expand/tests/acl_runtime_probe.py
+
+Observed:
+  aclInit: rc=0 elapsed_ms=15.149
+  aclrtSetDevice: no return before the 60-second timeout
+  process exit code: 124
+  aclrtCreateContext: not reached
+  cleanup/reset/finalize: not reached because the process was terminated while
+    blocked inside aclrtSetDevice
+
+Host evidence:
+  Driver version: 25.5.0 (V100R001C23SPC005B219)
+  Firmware version reported by npu-smi: NA
+  npu-smi global warning: driver package may not be completely installed
+
+Result:
+  SUPERSEDED: the controlled A/B test found DEVICE-SPECIFIC FAILURE. Device 0
+  times out under both CANN 8.5 and 9.0, while device 2 passes under both.
+  There is no evidence here for a CANN 8.5/Driver version incompatibility.
+  MhcExpand validation was not run.

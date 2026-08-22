@@ -1,0 +1,39 @@
+CUSTOM_INSTALL_DIR=/tmp/mhc-expand-a3-cann85.IrSuPR
+RUNTIME_INIT_BEGIN monotonic_s=4436089.668165120
+ACL_INIT_BEGIN monotonic_s=4436089.681522560
+ACL_INIT_END monotonic_s=4436089.692388520 elapsed_ms=10.821 rc=0
+ACLRT_SET_DEVICE_BEGIN monotonic_s=4436089.692412050
+ACLRT_SET_DEVICE_END monotonic_s=4436090.121327790 elapsed_ms=428.867 rc=0
+ACLRT_CREATE_CONTEXT_BEGIN monotonic_s=4436090.121384630
+ACLRT_CREATE_CONTEXT_END monotonic_s=4436090.122362960 elapsed_ms=0.955 rc=0
+ACLRT_CREATE_STREAM_BEGIN monotonic_s=4436090.122386980
+ACLRT_CREATE_STREAM_END monotonic_s=4436090.122731770 elapsed_ms=0.333 rc=0
+RUNTIME_INIT_END monotonic_s=4436090.122745200 device=4
+CUSTOM_LIBRARY_LOAD_BEGIN monotonic_s=4436090.122758860
+CUSTOM_LIBRARY_LOAD_END monotonic_s=4436090.155273030 elapsed_ms=32.366 library=/tmp/mhc-expand-a3-cann85.IrSuPR/vendors/custom/op_api/lib/libcust_opapi.so
+CASE_BEGIN name=forward_fp16_smoke dtype=fp16 S=1 D=16 m=2 backward=false
+INPUT_ALLOCATION_BEGIN monotonic_s=4436090.155416630
+INPUT_ALLOCATION_END monotonic_s=4436090.155637760 input_bytes=32 output_bytes=64
+ACL_CREATE_TENSOR_BEGIN monotonic_s=4436090.155648250
+ACL_CREATE_TENSOR_END monotonic_s=4436090.155797010
+GET_WORKSPACE_BEGIN monotonic_s=4436090.155809220
+GET_WORKSPACE_END monotonic_s=4436090.729122820 elapsed_ms=573.216 rc=161001 workspace_size=0 executor_nonnull=False
+ACLRT_DESTROY_STREAM_BEGIN monotonic_s=4436090.729619320
+ACLRT_DESTROY_STREAM_END monotonic_s=4436090.730557890 elapsed_ms=0.911 rc=0
+ACLRT_DESTROY_CONTEXT_BEGIN monotonic_s=4436090.730578200
+ACLRT_DESTROY_CONTEXT_END monotonic_s=4436090.731461100 elapsed_ms=0.869 rc=0
+ACLRT_RESET_DEVICE_BEGIN monotonic_s=4436090.731477970
+ACLRT_RESET_DEVICE_END monotonic_s=4436090.955265270 elapsed_ms=223.717 rc=0
+ACL_FINALIZE_BEGIN monotonic_s=4436090.955325280
+ACL_FINALIZE_END monotonic_s=4436091.715356740 elapsed_ms=759.967 rc=0
+Traceback (most recent call last):
+  File "/home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/tests/run_staged_correctness.py", line 396, in <module>
+    raise SystemExit(main())
+  File "/home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/tests/run_staged_correctness.py", line 378, in main
+    run_case(
+  File "/home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/tests/run_staged_correctness.py", line 262, in run_case
+    runtime._check(host_rc, "aclnnMhcExpandGetWorkspaceSize")
+  File "/home/liufujiang/workspace/xingchenbei/tasks/mhc_expand/tests/run_staged_correctness.py", line 112, in _check
+    raise RuntimeError(f"{operation} failed: {status}")
+RuntimeError: aclnnMhcExpandGetWorkspaceSize failed: 161001
+SMOKE_EXIT_STATUS=1
