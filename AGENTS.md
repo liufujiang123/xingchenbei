@@ -88,16 +88,24 @@ Rules for CANNJudge usage:
 
 ## Required optimization loop
 
+Before the first meaningful performance candidate, run the generic Ascend diagnosis path when available:
+
+```bash
+python3 tools/agent_loop.py diagnose --task <task> --name pre-candidate
+```
+
+The diagnosis may combine profiler evidence, configured hints and static source risks. Treat them in that order of confidence. Never report a `static_risk_tag` as a measured bottleneck.
+
 For every meaningful performance candidate:
 
-1. state one focused hypothesis;
+1. state one focused hypothesis tied to the current diagnosis/profile evidence;
 2. make one major optimization change at a time;
 3. run `scripts/guard.sh` when configured;
 4. run `scripts/build.sh`;
 5. run `scripts/validate.sh`;
 6. only after correctness passes, run `scripts/bench.sh`;
-7. run `scripts/profile.sh` when evidence is needed to choose the next hypothesis;
-8. record the candidate, commands, result, score, and keep/reject decision;
+7. run `scripts/profile.sh` or `agent_loop.py profile/diagnose` when evidence is needed to choose the next hypothesis;
+8. record the candidate, commands, result, score, diagnosis evidence, and keep/reject decision;
 9. reject or fix any candidate that breaks correctness, even if faster.
 
 Never loosen tolerance, skip required cases, shrink the required range, or alter the reference to manufacture a pass.

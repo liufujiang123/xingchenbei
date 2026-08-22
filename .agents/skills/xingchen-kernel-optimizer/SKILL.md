@@ -1,6 +1,6 @@
 ---
 name: xingchen-kernel-optimizer
-description: Evidence-driven Ascend C competition optimization with research-derived pipeline, memory, scheduling, synchronization and hardware-path reasoning.
+description: Evidence-driven Ascend C competition optimization with source/profile diagnosis and research-derived pipeline, memory, scheduling, synchronization and hardware-path reasoning.
 ---
 
 # Xingchen Kernel Optimizer
@@ -17,7 +17,7 @@ Use this skill after the competition contract is understood. Correctness and the
 
 Use `cannjudge-submit` only for CANNJudge facts/actions and never submit without explicit user authorization. Never expose credentials.
 
-Use the official Ascend skills for architecture/tiling, code generation, compile/debug, precision, performance evaluation and performance optimization. This skill coordinates them; it does not replace them.
+Use the official Ascend skills for architecture/tiling, code generation, compile/debug, precision, performance evaluation and optimization. This skill coordinates them; it does not replace them.
 
 ## Before performance work
 
@@ -29,13 +29,70 @@ Confirm a correctness baseline exists. Read:
 
 Record `git status --short` and identify the immutable platform-visible interface.
 
-## Mandatory Ascend performance model
+## Diagnosis is the default entry point
 
-Before editing performance code, write a short model in the task log.
+Before choosing a performance candidate, prefer:
+
+```bash
+python3 tools/agent_loop.py diagnose \
+  --task <task> \
+  --name pre-candidate
+```
+
+This runs configured gates, runs `PROFILE_CMD` when available, performs conservative source analysis, and attaches a ranked research-derived shortlist to the task-local harness record.
+
+When recent build/correctness evidence already exists and a cheap source-only pass is intended:
+
+```bash
+python3 tools/agent_loop.py diagnose \
+  --task <task> \
+  --skip-build \
+  --skip-validate \
+  --skip-profile \
+  --name source-scan
+```
+
+`profile` mode also attaches diagnosis automatically.
+
+Do not treat `static_risk_tags` as measured bottlenecks. Evidence priority is:
+
+`profile-observed > configured hypothesis > static source risk`.
+
+If profile and static class inference disagree, inspect the conflict before editing.
+
+## Stable profiler evidence contract
+
+A task profiler wrapper may optionally emit:
+
+```text
+HARNESS_OPERATOR_CLASS=<vector|cube|mixed_cv>
+HARNESS_BOTTLENECKS=<comma-separated tags>
+HARNESS_PROFILE_NOTE=<short measured observation>
+```
+
+Allowed tags include:
+
+`pipeline`, `memory`, `bandwidth`, `cache`, `compute`, `latency`, `underutilization`, `scalar`, `synchronization`, `tiling`, `sparse`.
+
+Only emit claims supported by actual profiler evidence.
+
+Generic task configuration knobs:
+
+```bash
+PERF_OPERATOR_CLASS=auto
+PERF_SOURCE_DIRS=''
+PERF_BOTTLENECK_HINTS=''
+PERF_PLAN_LIMIT=5
+PERF_ADVANCED=0
+```
+
+Do not encode testcase IDs or reference-project magic numbers in these settings.
+
+## Mandatory Ascend performance model
 
 ### A. Classify the hot path
 
-Choose one primary class for the candidate:
+Resolve one primary class:
 
 - `vector`: `GM -> UB -> V -> UB -> GM`
 - `cube`: `GM -> L1 -> L0 -> Cube -> L0C/FIX -> GM`
@@ -49,32 +106,42 @@ List relevant Scalar, MTE1/MTE2/MTE3, Vector, Cube, UB/L1/L0, workspace and flag
 
 For every wait/barrier ask:
 
-- is this a true data dependency?
-- or only buffer/workspace reuse?
-- how many tasks may safely be in flight before overwrite or semantic dependency?
+- true data dependency or only buffer/workspace reuse?
+- how many tasks may safely be in flight?
+- which values remain live across that lead distance?
 
 ### C. Perform the research-derived scan
 
-Check these six questions before choosing a candidate:
+Check these questions before selecting a candidate:
 
-1. **Dependency axes** — which axis must remain serial, and which orthogonal axes can be parallelized?
-2. **Working-set liveness** — which buffers are simultaneously live? Which buffers are actually touched asynchronously? Does a ring/stage count fit UB/L1/L2 rather than merely fit correctness?
-3. **Locality/conflict** — can task order improve cache reuse, or are many cores reading the same GM region at the same phase?
-4. **Movement** — can paged/sparse/reformatted data be assembled directly in UB/L1 instead of materialized in GM? Are repeated small transfers worth batching?
-5. **Hardware path** — does the target dtype/shape/API lower to the intended vector/Cube/DMA path, or silently use a scalar/slow conversion path?
-6. **Algorithmic passes** — can repeated full scans/reductions be fused while preserving the numerical contract?
+1. **Dependency axes** — keep true recurrence chains local; parallelize orthogonal axes.
+2. **Working-set liveness** — derive buffer/ring depth from live ranges, async hazards and cache/on-chip capacity.
+3. **Locality/conflict** — consider grouped/swizzled reuse and phase-shifted traversal when cores contend for the same GM phase.
+4. **Movement** — assemble sparse/paged/reformatted fragments directly in UB/L1 when legal instead of materializing GM intermediates.
+5. **Algorithmic passes** — fuse related full reduction scans when an online correction preserves the numerical contract.
+6. **Hardware path** — verify anomalously slow dtype/shape/API combinations lower to the intended hardware path.
+7. **Autotune regime** — use a small hardware-pruned search keyed by performance-relevant shape/dtype/layout regimes.
 
-### D. Diagnose the bottleneck
+## High-value rules learned from real Ascend kernels
 
-Use source evidence plus `ascendc-operator-performance-eval`/msprof or equivalent profiling where available. Tag with one or more of:
+- More buffers/stages are not monotonically better.
+- Only asynchronously shared buffers need multi-buffering.
+- Ping-pong can still leave output-block boundary bubbles; model prologue/main/drain.
+- Resident and streaming operands are asymmetric.
+- Per-task C/V ready/wait can create lockstep; a bounded credit window may be better when dependency distance permits.
+- Cross-core synchronization can sometimes be batched, but tail flush and true dependencies are mandatory.
+- Ring depth should follow temporary live windows and cache fit, not a fixed maximum.
+- Task order can affect both cache reuse and synchronized GM contention.
+- Recurrent state should stay on one task/core when possible.
+- Reducing GM passes can be worth extra Vector arithmetic.
+- Supported dtype does not imply a fast implementation path.
+- MicroAPI/register kernels are advanced tools for a proven inner hotspot, not a default rewrite.
 
-`pipeline`, `memory`, `bandwidth`, `cache`, `compute`, `latency`, `underutilization`, `scalar`, `synchronization`, `tiling`, `sparse`.
-
-Prefer a measured pipeline gap or resource symptom over intuition.
+Never copy fixed stage counts, ring depths, synchronization intervals, AIC:AIV ratios, tile shapes or transfer thresholds from another repository.
 
 ## Candidate planner
 
-Generate a small shortlist:
+`agent_loop.py diagnose/profile` already embeds a shortlist. Standalone lookup remains available:
 
 ```bash
 python3 tools/ascend_perf_plan.py \
@@ -83,61 +150,40 @@ python3 tools/ascend_perf_plan.py \
   --bottleneck <tag>
 ```
 
-The default output contains only `core` patterns. Keep this default for ordinary optimization.
-
-Use:
+Advanced patterns stay hidden unless profile and target API evidence justify them:
 
 ```bash
-python3 tools/ascend_perf_plan.py ... --advanced
+python3 tools/agent_loop.py diagnose \
+  --task <task> \
+  --advanced-diagnosis
 ```
 
-only when profiling and target CANN/SOC API evidence justify lower-level or more fragile mechanisms such as MicroAPI register kernels or direct C/V handoff.
-
 The registry is a hypothesis library, not an automatic rewrite engine.
-
-## High-value rules learned from real Ascend kernels
-
-- **More buffers/stages are not monotonically better.** Derive stage/ring depth from live ranges, dependency distance, on-chip capacity and cache working set.
-- **Only buffers participating in asynchronous producer/consumer access need multi-buffering.** Do not double-buffer Vector-only temporaries without a hazard.
-- **Ping-pong may still leave block-boundary bubbles.** Model prologue/main/epilogue and consider cross-block preload when MTE2 gaps remain.
-- **Resident and streaming operands are asymmetric.** A reused resident operand usually should not consume the same multi-buffer budget as the streamed side.
-- **Cross-core ready/wait per tile can create lockstep.** For mixed C/V, consider legal synchronization batching or a bounded credit window; derive the window from true dependency distance and storage capacity.
-- **Task order affects memory behavior.** Group/swizzle for reuse and phase-shift independent traversal when simultaneous same-address traffic causes bandwidth conflict.
-- **A recurrence should stay local when possible.** Parallelize independent sequence/head/row axes rather than synchronizing recurrent state across cores.
-- **Avoid GM intermediates.** Fuse fragmented gather/reformat into on-chip staging when transfer granularity remains efficient.
-- **Supported dtype does not guarantee a fast hardware path.** Inspect generated target code or API branch when a dtype/shape is anomalously slow.
-- **Reduce bytes before adding arithmetic.** Online/pass-fused formulations can win when they remove full GM scans and remain numerically valid.
-
-Do not copy fixed values such as stage count, ring depth, synchronization interval, AIC:AIV ratio, tile shape or transfer threshold from another repository.
 
 ## One-candidate rule
 
 Each candidate must state:
 
 - hypothesis;
-- observed bottleneck;
-- expected resource/pipeline effect;
+- evidence level and bottleneck;
+- expected Ascend resource/pipeline effect;
 - one major mechanism changed;
-- additional UB/L1/workspace or code-size cost;
+- added UB/L1/workspace/code-size cost;
 - correctness/precision risk;
 - exact same-case evaluation plan.
 
-Then execute target build -> correctness -> benchmark; profile only to answer a concrete question.
+Then run target build -> correctness -> benchmark. Profile only to answer a concrete question. Do not stack an unproven mechanism into the retained implementation.
 
-Do not stack an unproven candidate into the retained implementation.
+When candidates interact, use this order:
 
-## Ordering
-
-When candidates interact, order them explicitly:
-
-1. semantic/dependency-safe task decomposition;
-2. layout/data-movement changes;
-3. buffering/residency/pipeline changes;
+1. dependency-safe task decomposition;
+2. layout/data movement;
+3. buffering/residency/pipeline;
 4. synchronization/window tuning;
-5. tile/stage/autotune parameters;
-6. advanced hardware-path or register microkernels.
+5. tiling/regime autotune;
+6. advanced hardware-path/register microkernel.
 
-Recompute memory budgets after a change that alters live buffers.
+Recompute memory budgets after any change to live buffers.
 
 ## Promotion
 
@@ -152,20 +198,6 @@ Promote only when:
 
 Record `PROMOTE`, `REJECT` or `INCONCLUSIVE` in `tasks/<task>/optimization-log.md`, including failed experiments.
 
-CANNJudge score is authoritative platform evidence only when actually returned by CANNJudge. Local A3 measurements must not be presented as 910B proof.
-
-## Attention/sparse-specific extension
-
-For attention-like or sparse kernels also inspect:
-
-- sparse/paged gather coalescing and direct on-chip staging;
-- online softmax / pass fusion;
-- state/recurrent dependency placement;
-- Q/K/V residency and reuse asymmetry;
-- Cube/Vector producer-consumer overlap;
-- workspace live windows and cross-core synchronization;
-- Matmul/MMAD utilization;
-- FP32-sensitive accumulation;
-- avoidance of large score/state GM intermediates.
+CANNJudge score is authoritative platform evidence only when actually returned by CANNJudge. Local proxy measurements are not target-platform proof.
 
 Never optimize by guessing hidden testcases.

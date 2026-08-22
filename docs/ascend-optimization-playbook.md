@@ -1,172 +1,233 @@
 # Ascend-first kernel optimization playbook
 
-This playbook turns Ascend hardware characteristics into an explicit optimization phase for the competition harness. It complements the official `ascendc-operator-performance-eval` and `ascendc-operator-performance-optim` skills; it does not replace them.
+This playbook is the generic performance layer of the competition harness. It complements the official Ascend performance skills; it does not replace them.
 
-## Why this exists
+The target loop is:
 
-A generic loop such as `profile -> try optimization -> benchmark` is not enough. Ascend AI Core exposes independent instruction pipelines/queues (for example Vector, Cube, MTE and Scalar), several on-chip memory levels, and explicit synchronization. A useful agent should reason about those resources before generating a candidate.
+`contract -> correctness baseline -> source/profile diagnosis -> operator class -> bottleneck tags -> research-derived shortlist -> one candidate -> build/correctness/bench -> keep/reject`
 
-The goal is:
+## 1. Evidence hierarchy
 
-`operator contract -> operator class -> resource/dataflow model -> measured bottleneck -> matching Ascend patterns -> one candidate -> gates -> keep/reject`
+Performance reasoning must keep three evidence levels separate:
 
-## 1. Classify the operator before optimizing
+1. **profile-observed** — profiler output, explicit profile markers, measured utilization/stall/cache symptoms;
+2. **configured hypothesis** — a task/operator hint supplied because the profiler cannot expose a needed metric;
+3. **static source risk** — source constructs that make a bottleneck plausible.
 
-Every performance pass must classify the hot path as one of:
+A static source risk is never a measured bottleneck. It is only a reason to profile or test a candidate.
 
-- `vector`: primarily SIMD/Vector work. Typical dataflow: `GM -> UB -> Vector -> UB -> GM`.
-- `cube`: primarily matrix/Cube work. Typical dataflow: `GM -> L1 -> L0A/L0B -> Cube -> L0C -> FixPipe -> ...`.
-- `mixed_cv`: Cube produces/consumes tiles together with substantial Vector post/pre-processing.
+The harness records these separately in `record["diagnosis"]`.
 
-Do not propose Cube/Vector parallelism for a pure Vector operator. For a Vector operator, the analogous pipeline opportunity is usually MTE2/MTE3 overlap with V plus multicore/UB improvements.
+## 2. Classify the hot path
 
-## 2. Write the resource graph
+Every performance pass resolves one primary class:
 
-Before code changes, record which resources each stage uses and the true dependencies between stages.
+- `vector`: typical flow `GM -> UB -> V -> UB -> GM`;
+- `cube`: typical flow `GM -> L1 -> L0A/L0B -> Cube -> L0C/FIX -> GM`;
+- `mixed_cv`: substantial Cube and Vector stages exchange staged tiles/workspace.
+
+Classification precedence is:
+
+`configured PERF_OPERATOR_CLASS -> HARNESS_OPERATOR_CLASS profile marker -> static source inference`
+
+Use `PERF_OPERATOR_CLASS=auto` by default. Override only when the generic scanner cannot see generated/lowered code or the source intentionally contains inactive implementations for multiple classes.
+
+## 3. Run diagnosis through the harness
+
+Normal pre-candidate diagnosis:
+
+```bash
+python3 tools/agent_loop.py diagnose \
+  --task <task> \
+  --name pre-candidate
+```
+
+`diagnose` performs the configured guard/build/correctness gates and, when `PROFILE_CMD` exists, runs the profiler before generating the shortlist.
+
+For a cheap static-only pass after fresh correctness evidence:
+
+```bash
+python3 tools/agent_loop.py diagnose \
+  --task <task> \
+  --skip-build \
+  --skip-validate \
+  --skip-profile \
+  --name source-scan
+```
+
+The existing profile mode also attaches diagnosis automatically:
+
+```bash
+python3 tools/agent_loop.py profile \
+  --task <task> \
+  --name <question>
+```
+
+The task-local JSON record contains:
+
+- resolved operator class and its source;
+- `observed_bottlenecks`;
+- configured hints;
+- `static_risk_tags`;
+- profile/source evidence snippets;
+- conflicts between profile and source classification;
+- a small ranked list from `config/ascend_optimization_patterns.json`.
+
+## 4. Optional stable profile markers
+
+Profiler wrappers may emit these lines:
+
+```text
+HARNESS_OPERATOR_CLASS=vector
+HARNESS_BOTTLENECKS=pipeline,memory,bandwidth
+HARNESS_PROFILE_NOTE=MTE2 waits dominate the steady state
+```
+
+Allowed classes are `vector`, `cube`, `mixed_cv`.
+
+Useful bottleneck tags are:
+
+`pipeline`, `memory`, `bandwidth`, `cache`, `compute`, `latency`, `underutilization`, `scalar`, `synchronization`, `tiling`, `sparse`.
+
+Markers are optional. The analyzer also conservatively recognizes textual symptoms such as pipeline bubbles, sync stalls, cache misses and low core utilization. Do not print a tag from a wrapper unless the underlying profiler actually supports the claim.
+
+## 5. Generic task configuration
+
+Task configs may add:
+
+```bash
+# auto is recommended.
+PERF_OPERATOR_CLASS=auto
+
+# Optional comma/semicolon-separated source roots.
+# Defaults to WORKSPACE_DIR plus TASK_DIR.
+PERF_SOURCE_DIRS='tasks/<task>/workspace/code'
+
+# Optional hypothesis tags when a profiler cannot expose the symptom directly.
+PERF_BOTTLENECK_HINTS=''
+
+# Keep shortlists small.
+PERF_PLAN_LIMIT=5
+
+# Advanced patterns stay off by default.
+PERF_ADVANCED=0
+```
+
+These are generic knobs. They must not encode visible testcase IDs, hidden-test guesses, fixed competition scores, or another repository's magic stage/tile/ring values.
+
+## 6. Resource/dependency model
+
+Before editing code, inspect the diagnosis and still reason about the actual dependency graph.
 
 ### Vector
 
-Typical queues/resources:
+Relevant resources typically include:
 
-- Scalar/control (`S`)
-- GM -> UB transfer (`MTE2`)
-- Vector compute (`V`)
-- UB -> GM transfer (`MTE3`)
-- UB capacity and queue buffers
+`Scalar -> MTE2 -> UB -> V -> UB -> MTE3`
 
-Ask whether the implementation is effectively:
-
-`CopyIn(n) -> Compute(n) -> CopyOut(n) -> CopyIn(n+1)`
-
-when independent queues could instead overlap work on different tiles:
+Ask whether independent tiles can achieve:
 
 `CopyIn(n+1) || Compute(n) || CopyOut(n-1)`.
 
+Only buffers participating in asynchronous producer/consumer access need multi-buffering. V-only temporaries do not gain overlap merely because they have two copies.
+
 ### Cube
 
-Typical resources include MTE2, MTE1, Cube (`M`), FixPipe, L1, L0A/L0B/L0C. Look for data-loading or FixPipe gaps around Cube work and for poor matrix-tile utilization.
+Typical resources include:
+
+`MTE2 -> L1 -> MTE1 -> L0A/L0B -> M -> L0C -> FIX`
+
+Ping-pong inside a K loop can still leave bubbles between output blocks. Model prologue, steady state and drain; cross-block preload is a separate candidate from ordinary double buffering.
+
+When one operand is reused and fits L1, model resident and streaming sides asymmetrically instead of spending identical stage counts on both.
 
 ### Mixed Cube + Vector
 
-Treat Cube and Vector as producer/consumer stages, not automatically as a serial `C then V` sequence. For independent tiles a desired steady state often resembles:
+Treat C/V as a bounded producer-consumer system, not automatically as lockstep.
 
-`Cube(tile n+1) || Vector(tile n)`
+Investigate:
 
-with synchronization only at true data dependencies. Workspace/buffer reuse can create false dependencies: a producer may wait only because the consumer has not released the same slot. Evaluate a deeper workspace ring when profile evidence shows both C and V idle gaps.
+- whether adjacent C/V tasks are independent;
+- whether each wait is a true dependency or only workspace-slot reuse;
+- legal producer lead distance;
+- long-lived versus short-lived workspace values;
+- whether a fixed ring is larger than the useful live window/cache working set;
+- whether synchronization may be batched without delaying a real dependency.
 
-## 3. Pipeline techniques are first-class candidates
+A credit window, ring depth, sync interval or AIC:AIV ratio must be derived for the current kernel. Never copy the value from a reference repository.
 
-### Double buffer / ping-pong
+## 7. Research-derived scan
 
-Different AI Core instruction queues can execute independently. When multiple independent tiles exist and on-chip capacity permits, double buffering can hide movement behind compute. This is not a universal win: extra buffers reduce available UB/L1 and may hurt small shapes.
+For every candidate cycle ask:
 
-A candidate must therefore state:
+- **dependency axes** — which axis is a true recurrence and which orthogonal axes are independent?
+- **working-set liveness** — which values are live simultaneously and which are asynchronously accessed?
+- **locality/conflict** — can grouped/swizzled order improve reuse, or can traversal phases be offset to reduce synchronized GM conflicts?
+- **movement** — can sparse/paged/reformatted fragments be assembled directly in UB/L1 instead of round-tripping through GM?
+- **algorithmic passes** — can related full reduction scans be fused with a numerically valid online state?
+- **hardware path** — does the supported dtype/shape actually lower to the intended hardware path?
+- **autotune regime** — do different shape/dtype/layout regimes justify a small hardware-pruned candidate set?
 
-- which stages overlap;
-- which two (or more) tiles are live at once;
-- buffer ownership/lifetime;
-- required event/barrier edges;
-- extra UB/L1/workspace bytes;
-- expected bottleneck hidden by the overlap.
+The pattern registry records the reusable mechanism and its guard, not reference-project parameter values.
 
-### C/V overlap
+## 8. Candidate generation
 
-For `mixed_cv`, inspect whether Cube and Vector have useful independent work on adjacent tiles. Candidate families include:
-
-- C(tile n+1) overlapping V(tile n);
-- avoiding unnecessary full-stage barriers;
-- separate workspace slots/ring buffers to eliminate false producer-consumer serialization;
-- measured AIC/AIV work-ratio tuning when one side is consistently bound.
-
-The official Ascend GroupedMatmul optimization case is an example of this method: it analyzes Cube/Vector gaps, changes AIC/AIV balance, deepens workspace buffering to reduce C/V waiting, and then adds Vector double buffering. Treat such numbers as an example, not a portable constant for other operators/SOCs.
-
-### MTE/V overlap
-
-For `vector`, inspect whether CopyIn/CopyOut and Vector compute are serialized. Use TPipe/TQue/ping-pong only when there are enough independent tiles and the UB budget still supports efficient vector work.
-
-## 4. Other Ascend optimization dimensions
-
-After architecture/pipeline classification, consider only the dimensions supported by evidence:
-
-- **multicore**: task granularity, block/core count, shape-aware tiling, tail balance;
-- **data movement**: contiguous/coalesced transfers, aligned full-tile fast paths, DataCopyPad only where needed;
-- **memory hierarchy**: UB/L1/L0 reuse, avoid GM materialization of intermediates, balance reuse against occupancy;
-- **API usage**: avoid redundant Duplicate/cast/copy, use efficient supported Ascend C APIs for the target CANN/SOC;
-- **scalar/control**: hoist invariants, avoid repeated integer div/mod in hot loops, specialize only stable/common small modes;
-- **precision-aware reduction**: FP32 accumulation where required; any changed reduction order is a precision-risk candidate;
-- **internal fusion**: keep compatible pre/post-processing close to the producer instead of round-tripping through GM/workspace when the competition interface permits.
-
-## 5. Profiling evidence expected by the agent
-
-Do not infer pipeline utilization only from source shape. When profiling is available, capture evidence such as:
-
-- end-to-end kernel latency after warmup;
-- per-case median and variance;
-- core/block utilization and work distribution;
-- instruction/cycle utilization (Vector/Cube/MTE/Scalar where exposed);
-- pipeline timeline gaps and producer/consumer waits;
-- bytes or repeated transfers implied by the implementation;
-- UB/L1/L0/workspace budget for the candidate.
-
-Profile output should answer a question, for example: “Is Vector waiting on MTE2?” or “Are C and V serialized by workspace reuse?”
-
-## 6. Candidate generation
-
-After classification and bottleneck identification, use the machine-readable registry:
+Standalone manual lookup remains available:
 
 ```bash
 python3 tools/ascend_perf_plan.py \
   --task <task> \
-  --operator-class vector \
-  --bottleneck pipeline \
-  --bottleneck memory
+  --operator-class <vector|cube|mixed_cv> \
+  --bottleneck <tag>
 ```
 
-For a mixed Cube/Vector operator:
+However, prefer the shortlist embedded by `agent_loop.py diagnose/profile`, because it preserves the provenance of the tags used for ranking.
+
+Advanced/SOC- or API-sensitive patterns are hidden by default. Expose them only with:
 
 ```bash
-python3 tools/ascend_perf_plan.py \
+python3 tools/agent_loop.py diagnose \
   --task <task> \
-  --operator-class mixed_cv \
-  --bottleneck pipeline
+  --advanced-diagnosis
 ```
 
-The output is a candidate shortlist, not permission to apply every pattern.
+Examples include MicroAPI register microkernels and closer C/V handoff. They should be considered only after ordinary layout/movement/pipeline fixes and target CANN/SOC support are established.
 
-## 7. One-candidate rule
+## 9. One-candidate rule
 
-A candidate should change one main mechanism so its contribution can be measured. Examples:
+Each candidate must state:
 
-- only change queue depth / double buffering;
-- only change workspace ring depth;
-- only change AIC/AIV work partition;
-- only change tile size/core utilization;
-- only replace aligned DataCopyPad calls with DataCopy fast paths.
+- hypothesis;
+- evidence level and bottleneck tag;
+- expected resource/pipeline effect;
+- one major mechanism changed;
+- UB/L1/workspace/code-size cost;
+- correctness/precision risk;
+- exact same-case evaluation plan.
 
-Do not combine C/V overlap, new tiling and precision-changing reduction in the same experiment.
+Do not stack several unproven mechanisms.
 
-## 8. Promotion gates
+Recommended order when mechanisms interact:
 
-Every candidate still passes the repository gates:
+1. dependency-safe task decomposition;
+2. layout/data movement;
+3. buffering/residency/pipeline;
+4. synchronization/window tuning;
+5. tiling/regime autotune;
+6. advanced hardware path/register microkernel.
 
-1. public interface unchanged;
-2. target-platform build passes;
-3. configured correctness matrix passes;
-4. same-case benchmark improves beyond noise;
-5. no required shape/dtype/mode domain is narrowed;
-6. platform-specific conclusions are labeled correctly (for example A3 proxy is not 910B proof).
+Recompute memory budgets whenever live buffers change.
 
-Record failed candidates too.
+## 10. Promotion
 
-## MhcExpand classification note
+A candidate is retained only when:
 
-MhcExpand currently belongs to the `vector` family: forward is data replication and backward is a small-factor reduction. It has no meaningful Cube stage, so C/V parallelism should not be forced into this operator. Its Ascend-first search should emphasize:
+- public interface is unchanged;
+- target build passes;
+- required correctness/precision passes;
+- same-case performance improves beyond noise;
+- required shape/dtype/mode coverage is not narrowed;
+- proxy hardware evidence is labeled as proxy;
+- CANNJudge conclusions come only from actual platform responses.
 
-- MTE2/V/MTE3 overlap and double buffering where enough tiles exist;
-- multicore utilization for low-S/high-D and high-S/low-D shapes;
-- aligned copy fast paths;
-- UB source/accumulator reuse;
-- scalar task-mapping overhead;
-- precision-safe reduction specialization.
-
-This distinction is exactly why the framework classifies the operator before selecting techniques.
+Record rejected and inconclusive experiments too. Failure is useful evidence for the next diagnosis.
