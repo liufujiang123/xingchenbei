@@ -64,6 +64,7 @@ public:
         keyRopeIsFloat_ = tiling.keyRopeIsFloat;
         hasActualQueryLen_ = tiling.hasActualQueryLen;
         hasActualKvLen_ = tiling.hasActualKvLen;
+        sparseBlockSize_ = tiling.sparseBlockSize == 0 ? 1U : tiling.sparseBlockSize;
         sparseMode_ = tiling.sparseMode;
         returnSoftmaxLse_ = tiling.returnSoftmaxLse;
         usedCoreNum_ = tiling.usedCoreNum;
@@ -293,39 +294,60 @@ private:
         float runningMax = NEG_INF;
         float runningSum = 0.0F;
 
+        // sparseSize_ is the number of selected sparse blocks. For
+        // sparseBlockSize_ == 1 each sparse index is exactly one KV token.
+        // For block-wise sparse attention, each index identifies a contiguous
+        // block and is expanded to sparseBlockSize_ KV tokens before applying
+        // actual-length and causal masking token by token.
         for (uint64_t k = 0; k < sparseSize_; ++k) {
-            const int64_t keyPosSigned = static_cast<int64_t>(sparseIndices_[indexBase + k]);
-            if (keyPosSigned < 0 || keyPosSigned >= static_cast<int64_t>(actualKvLen) ||
-                !PassCausal(queryPos, keyPosSigned, actualQueryLen, actualKvLen)) {
+            const int64_t sparseBlockIndex = static_cast<int64_t>(sparseIndices_[indexBase + k]);
+            if (sparseBlockIndex < 0) {
                 continue;
             }
-            const uint64_t keyPos = static_cast<uint64_t>(keyPosSigned);
-            const float score = ComputeScore(batch, queryPos, head, keyPos);
 
-            float alpha = 0.0F;
-            float beta = 1.0F;
-            float newMax = score;
-            if (hasValue) {
-                if (score > runningMax) {
-                    alpha = ExpNegative(runningMax - score);
-                    beta = 1.0F;
-                    newMax = score;
-                } else {
-                    alpha = 1.0F;
-                    beta = ExpNegative(score - runningMax);
-                    newMax = runningMax;
+            const uint64_t blockStart = static_cast<uint64_t>(sparseBlockIndex) *
+                                        static_cast<uint64_t>(sparseBlockSize_);
+            if (blockStart >= actualKvLen) {
+                continue;
+            }
+
+            for (uint64_t blockOffset = 0; blockOffset < sparseBlockSize_; ++blockOffset) {
+                const uint64_t keyPos = blockStart + blockOffset;
+                if (keyPos >= actualKvLen) {
+                    break;
                 }
-            }
-            const float newSum = runningSum * alpha + beta;
-            const uint64_t valueBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
-            for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-                const float oldAcc = accumulator_.GetValue(d);
-                accumulator_.SetValue(d, oldAcc * alpha + beta * ReadValue(valueBase + d));
-            }
+                if (!PassCausal(queryPos, static_cast<int64_t>(keyPos),
+                                actualQueryLen, actualKvLen)) {
+                    continue;
+                }
 
-            runningMax = newMax;
-            runningSum = newSum;
-            hasValue = true;
+                const float score = ComputeScore(batch, queryPos, head, keyPos);
+
+                float alpha = 0.0F;
+                float beta = 1.0F;
+                float newMax = score;
+                if (hasValue) {
+                    if (score > runningMax) {
+                        alpha = ExpNegative(runningMax - score);
+                        beta = 1.0F;
+                        newMax = score;
+                    } else {
+                        alpha = 1.0F;
+                        beta = ExpNegative(score - runningMax);
+                        newMax = runningMax;
+                    }
+                }
+                const float newSum = runningSum * alpha + beta;
+                const uint64_t valueBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
+                for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
+                    const float oldAcc = accumulator_.GetValue(d);
+                    accumulator_.SetValue(d, oldAcc * alpha + beta * ReadValue(valueBase + d));
+                }
+
+                runningMax = newMax;
+                runningSum = newSum;
+                hasValue = true;
+            }
         }
 
         if (!hasValue || runningSum <= 0.0F) {
@@ -387,6 +409,7 @@ private:
     uint32_t keyRopeIsFloat_;
     uint32_t hasActualQueryLen_;
     uint32_t hasActualKvLen_;
+    uint32_t sparseBlockSize_;
     uint32_t sparseMode_;
     uint32_t returnSoftmaxLse_;
     uint32_t usedCoreNum_;
