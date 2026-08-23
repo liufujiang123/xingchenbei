@@ -1,126 +1,64 @@
 # AGENTS.md
 
 This repository is an AI coding-agent harness for Ascend C competition operators.
-The closest nested `AGENTS.md`, when present, overrides this file for that subtree.
+A closer nested `AGENTS.md`, when present, overrides this file.
 
-## Priority of truth
+## Red lines
 
-When instructions conflict, use this order:
+- Preserve unrelated user work. Start with `git status --short`; do not revert or overwrite changes you do not own.
+- Competition statement/platform contract and the official template outrank repository guidance, skills, references, and assumptions.
+- Do not change the platform-visible operator contract unless authoritative competition evidence explicitly permits it.
+- Do not guess hidden tests, narrow required functionality, weaken tolerances, or alter references to manufacture a pass.
+- Build/correctness/performance claims require executed evidence. Local proxy results are not target-platform proof.
+- External submission requires explicit user authorization. Never expose credentials, tokens, cookies, private keys, or credential ciphertext.
 
-1. competition problem statement and platform submission contract, including current CANNJudge evidence for the matching problem ID;
-2. this repository `AGENTS.md` and any closer nested `AGENTS.md`;
-3. the official competition template and existing public interface;
-4. installed Ascend Agent Skills;
-5. CANNJudge/CANN engineering helper skills and KDA-style optimization references;
-6. the agent's own assumptions.
+Implementation choices such as shape/SOC dispatch, tile/core/workspace planning, pipeline depth, and specialization belong in Host Tiling, tiling data, workspace, or internal templates—not new public inputs.
 
-Never change a higher-priority contract to make a lower-priority idea easier to implement.
+## Context economy
 
-## Working principles
+Treat the current model context as a cache.
 
-- Start with `git status --short`; never overwrite unrelated user work.
-- Inspect with `rg` / `rg --files` before editing; do not guess paths.
-- Keep diffs focused. Avoid unrelated formatting and generated-file noise.
-- Build and test claims must be evidence-based. Never report an unexecuted command as passed.
-- Correctness has priority over performance.
-- Hidden tests exist. Do not optimize only for visible shapes or visible cases.
+At the start of a new Codex conversation for a task, run exactly once:
 
-## External-interface red line
+```bash
+python3 tools/context_state.py bootstrap --task <task> --new-session
+```
 
-Unless the competition contract explicitly permits it, do not change:
+After that:
 
-- operator name or registration entrypoint;
-- input/output/attribute names, counts, ordering, optionality, defaults, dtype semantics, or shape semantics;
-- required submission filenames, directory layout, or externally invoked symbols;
-- required functionality, masks, sequence-length semantics, sparse-index semantics, or numerical-output semantics.
+- unchanged file -> reuse current context; do not reread it;
+- changed file -> inspect the presented diff first;
+- diff insufficient -> read only the relevant section;
+- full reread -> last resort;
+- if context was compacted/lost, use `context_state.py use --force ...` for the specific file you need.
 
-Implementation information must stay internal. Shape/SOC/template/tile/core/workspace decisions should be derived by Host Tiling and passed via tiling data, workspace, or compile-time template parameters rather than new public inputs.
+For an official or repository skill, load it through:
 
-## Internal implementation freedom
+```bash
+python3 tools/context_state.py use --task <task> <skill-path>
+```
 
-Within the competition contract, the agent may change:
+Do not repeatedly `cat`/`sed` stable `AGENTS.md`, Skill files, `TASK.md`, or `design.md` for orientation.
 
-- Host Tiling strategy and tiling-data fields;
-- workspace planning;
-- kernel template organization;
-- GM/L1/UB/L0A/L0B/L0C planning when supported;
-- multicore partitioning;
-- data-movement and sparse-gather strategy;
-- Matmul/MMAD scheduling;
-- Vector/Cube pipeline and buffering;
-- softmax / online-softmax implementation;
-- precision-safe accumulation and casting strategy.
+Do not narrate routine compliance (“I will first read...”, “I will follow the workflow...”); report only new facts, blockers, decisions, and results.
 
-Do not hardcode one visible shape unless the task contract explicitly states that shape is the entire required domain. Template boundaries must follow real algorithm/resource differences, not evaluator case IDs.
+## Harness scope
 
-## Ascend Skills
+Use the Harness for high-value mechanical work:
 
-Prefer the installed official `Ascend/agent-skills` skills for domain-specific decisions:
+- context/version tracking;
+- interface and task-scope protection;
+- build -> correctness -> benchmark/profile evidence gates;
+- compact task/run state;
+- CANNJudge identity/package/result checks when configured;
+- design/performance experience lookup when available.
 
-- `ascendc-operator-design`
-- `ascendc-operator-code-gen`
-- `ascendc-operator-code-review`
-- `ascendc-operator-compile-debug`
-- `ascendc-operator-mssanitizer`
-- `ascendc-operator-precision-debug`
-- `ascendc-operator-performance-eval`
-- `ascendc-operator-performance-optim`
-- `xingchen-kernel-optimizer` (repository-local orchestration skill)
+Trust Codex for ordinary code reading, implementation, debugging, and general engineering judgment. Do not turn repository guidance into a checklist unless a concrete risk requires it.
 
-Do not run generic project-initialization skills inside a competition-provided template unless explicitly requested.
+Design experience is a catalog: inspect summaries once, choose relevant entries yourself, and load details only on demand. Machine suggestions are hints, not decisions.
 
-## CANNJudge platform skills
+After correctness is established, performance work should change one major mechanism at a time and keep/reject it from same-case evidence.
 
-The bootstrap also exposes the official CANN `cann-learning-hub` skills:
+## Finish
 
-- `cannjudge-submit`: platform interaction only — obtain current problem metadata, download/compare the official package, submit code when explicitly authorized, query submission results, and inspect rankings.
-- `ascendc-ops-project`: supporting dependency/reference for the CANNJudge skill. For core Ascend C design, implementation, precision, and performance decisions, prefer the dedicated `Ascend/agent-skills` skills above.
-
-Rules for CANNJudge usage:
-
-- Treat a current CANNJudge response/package for the verified matching problem ID as authoritative platform evidence. Do not infer hidden testcase contents.
-- Do not overwrite the checked-in competition workspace merely because a freshly downloaded package differs; compare and report the difference first.
-- Do not submit to CANNJudge unless the user explicitly requests or authorizes a submission in the current task/session.
-- Never ask the user to paste a plaintext CANNJudge password into chat or source files. Follow the skill's RSA-encrypted credential workflow.
-- Never print, copy into logs, or commit decrypted passwords, cookies, tokens, RSA private keys, or credential ciphertext.
-- Keep generated key material local. `private.pem`, `public.pem`, dependency checkouts, and generated skill symlinks are ignored by Git.
-- Do not attempt to discover or access hidden testcases. Use only platform-supported problem, package, submission-result, and ranking interfaces.
-
-## Required optimization loop
-
-For every meaningful performance candidate:
-
-1. state one focused hypothesis;
-2. make one major optimization change at a time;
-3. run `scripts/guard.sh` when configured;
-4. run `scripts/build.sh`;
-5. run `scripts/validate.sh`;
-6. only after correctness passes, run `scripts/bench.sh`;
-7. run `scripts/profile.sh` when evidence is needed to choose the next hypothesis;
-8. record the candidate, commands, result, score, and keep/reject decision;
-9. reject or fix any candidate that breaks correctness, even if faster.
-
-Never loosen tolerance, skip required cases, shrink the required range, or alter the reference to manufacture a pass.
-Performance claims must come from the configured evaluator/profiler, not Python wall-clock timing unless the competition itself defines wall-clock timing as the metric.
-
-## Task workflow
-
-Before a large implementation:
-
-- read the task contract under `tasks/<task>/TASK.md`;
-- inspect the competition statement/template;
-- use CANNJudge platform evidence to resolve platform-contract ambiguity when available;
-- establish a compiling correctness baseline;
-- keep `tasks/<task>/design.md` current with dataflow, tiling, memory plan, core split, precision risks, and optimization candidates;
-- keep `tasks/<task>/optimization-log.md` evidence-based.
-
-## End-of-task check
-
-Before finishing, verify:
-
-- only intended files changed;
-- public interface remains compatible;
-- supported dtype/shape/mode/boundary cases remain covered;
-- build and correctness commands actually ran, or blockers are stated explicitly;
-- performance claims have measured evidence;
-- no build outputs, profiler dumps, secrets, machine names, tokens, or environment-specific absolute paths are staged.
+Before finishing, verify intended diff scope, interface compatibility, executed validation evidence, and absence of generated artifacts or secrets.
