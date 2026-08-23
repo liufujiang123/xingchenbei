@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import tempfile
+import types
 
 
 def load_module(path):
@@ -16,6 +17,14 @@ def load_module(path):
 def main():
     src = pathlib.Path(__file__).resolve().parents[2] / "tools" / "context_state.py"
     mod = load_module(src)
+
+    original_run = mod.subprocess.run
+    worktree_cache = pathlib.Path(tempfile.mkdtemp()) / "common/.git/worktrees/demo/xingchen-context"
+    mod.subprocess.run = lambda *args, **kwargs: types.SimpleNamespace(
+        returncode=0, stdout=str(worktree_cache) + "\n"
+    )
+    assert mod._default_cache_root() == worktree_cache
+    mod.subprocess.run = original_run
 
     root = pathlib.Path(tempfile.mkdtemp(prefix="context-state-test-"))
     (root / ".git").mkdir()
