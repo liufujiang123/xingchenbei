@@ -243,6 +243,32 @@ def relative(path):
         return str(path)
 
 
+def problem_identity_mismatches(problem, env):
+    if not isinstance(problem, dict):
+        return ["platform problem response is not an object"]
+    expected = {
+        "internal_id": env.get("CANNJUDGE_PROBLEM_ID", "").strip(),
+        "public_id": env.get("CANNJUDGE_PUBLIC_PROBLEM_ID", "").strip(),
+        "contest_id": env.get("CANNJUDGE_CONTEST_ID", "").strip(),
+    }
+    observed = {
+        "internal_id": str(problem.get("_id", "")).strip(),
+        "public_id": str(problem.get("ID", "")).strip(),
+        "contest_id": str(problem.get("contest_id", "")).strip(),
+    }
+    return [
+        "%s expected=%s observed=%s" % (key, expected[key], observed[key])
+        for key in expected
+        if expected[key] and expected[key] != observed[key]
+    ]
+
+
+def print_problem_identity(problem):
+    print("platform.internal_id=%s" % problem.get("_id", "<missing>"))
+    print("platform.public_id=%s" % problem.get("ID", "<missing>"))
+    print("platform.contest_id=%s" % problem.get("contest_id", "<missing>"))
+
+
 def command_doctor(args, env, config_path):
     skill = discover_skill(env)
     module = load_official_module(skill)
@@ -272,6 +298,19 @@ def command_doctor(args, env, config_path):
         ensure_key(private_key)
     if not getattr(module, "HAS_CRYPTO", False):
         return 2
+    try:
+        problem = module.CANNJudgeClient().get_problem(problem_id)
+    except Exception as exc:
+        print("platform_identity_check=FAIL (%s: %s)" % (type(exc).__name__, exc))
+        return 2
+    print_problem_identity(problem)
+    mismatches = problem_identity_mismatches(problem, env)
+    if mismatches:
+        for mismatch in mismatches:
+            print("platform_identity_mismatch=%s" % mismatch)
+        print("platform_identity_check=FAIL")
+        return 2
+    print("platform_identity_check=PASS")
     print("CANNJUDGE_HARNESS_DOCTOR=PASS")
     return 0
 
@@ -291,6 +330,9 @@ def command_submit(args, env):
     print("CANNJUDGE_LOGIN=ok", flush=True)
 
     problem = client.get_problem(problem_id)
+    mismatches = problem_identity_mismatches(problem, env)
+    if mismatches:
+        raise SystemExit("platform problem identity mismatch: %s" % "; ".join(mismatches))
     canonical_id = str(problem.get("_id", problem_id)) if isinstance(problem, dict) else problem_id
     print("CANNJUDGE_PROBLEM_ID=%s" % canonical_id, flush=True)
     if isinstance(problem, dict) and problem.get("name"):

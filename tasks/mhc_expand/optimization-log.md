@@ -90,6 +90,105 @@ host-side executor pacing was observed to drift by several microseconds.
 | Compile-time backward `m=2/4`, generic `m=8` fallback | Retain the repeatable small/non-aligned `m=4` code-generation benefit without exposing wide `m=8` to its observed regression. | 910B Host/FP16/BF16/ACLNN/package PASS; A3 44/44 PASS; local proxy `300.35 us`. Platform Pass 5/5 with `[2.06,22.68,1376.62,47.60,2.32]`, best times `[2.02,15.22,1366.96,46.66,2.32]`, derived `92.4979`. | KEEP as new platform baseline |
 | Compile-time forward/backward mode | Removing the remaining per-core mode branch and unrelated mode body might help forward and generic backward keys. | 910B build and A3 44/44 passed. Local proxy was `301.89 us` versus retained `300.35 us`; FP16/BF16 directions conflicted on both medium `m=4` and wide `m=8`. | REJECT; reverted without platform submission |
 | Forward `m=4` whole-row UB materialization | Loading several complete rows once and materializing four contiguous copies in UB might replace strided GM stores with longer output transfers. | The candidate was reverted after the A3 correctness gate first failed the visible non-aligned BF16 forward case with `D=33`; it was not benchmarked or submitted. | REJECT; reverted |
+| Light complete-row scheduling (`C1`) | Forward and FP16 backward `m=2` have much less Vector/UB work than generic backward. For complete rows with `(m+1)*D*2 <= 2 KiB`, assigning about 16 rather than eight rows per core may reduce small-transfer scheduling and Scalar overhead without changing the heavier paths. | Fresh CANN 8.5 + 910B Host/FP16/BF16/ACLNN/package build PASS; local A3 44/44 PASS. Targeted same-window A3 `msprof` improved three selected paths by 12.7%-15.1%. The single authorized CANNJudge submission passed 5/5 precision but returned `[4.48,22.48,1384.70,47.26,4.94]`, versus the retained row8 baseline `[2.06,22.68,1376.62,47.60,2.32]`; the first and fifth opaque entries regressed by about 2x. | REJECT after platform A/B; reverted |
+
+### Light complete-row scheduling evidence
+
+- The generic diagnosis had no target profile and therefore supplied only static
+  memory/bandwidth/tiling/pipeline risk tags. The focused hypothesis instead came
+  from the retained row4/row8 platform history and the current per-path traffic
+  model; the static tags are not reported as measured bottlenecks.
+- The retained default remains eight complete rows per core below `S=192`.
+  The rejected candidate switched only forward or the FP16 backward `m=2`
+  direct-Add path to 16 when a row's mandatory input/output GM traffic was at
+  most `2 KiB`; no part of that policy remains in the source.
+- Two candidate ACL-event reports totaled `292.364397` and `302.813802 us` for
+  the 22-case matrix. Retained binaries measured `308.704934 us` before and
+  `314.710532 us` after. Because unchanged cases moved in the same direction,
+  these aggregate values are descriptive only; the path-specific device-task
+  medians above are the promotion evidence.
+- The task-local ACL benchmark accepts repeatable `--case-id` filters so a
+  profiler run can isolate selected JSONL cases. Omitting the option preserves
+  the existing complete-matrix behavior.
+- The single authorized platform evaluation was submission
+  `6a89b26d82cffa8f16910e53`. It reached `Pass` with `precision_ratio=1` on all
+  five entries and times `[4.48,22.48,1384.70,47.26,4.94]`; current
+  `best_time` was `[2.02,15.22,1366.96,46.66,2.10]`, giving derived mean
+  `70.5507`. The row16 policy was therefore reverted. No second submission was
+  issued.
+
+### Post-row16 recovery candidates
+
+| Candidate | Hypothesis | Evidence | Decision |
+|---|---|---|---|
+| Compile-time Init specialization for existing backward `m=2/4` keys | Constant-folding queue/buffer initialization may remove Scalar setup. | 910B build PASS; A3 44/44 PASS. Targeted A-B-A `msprof` changed FP16/BF16 `m=2` by +1.18%/+1.66% and `m=4` by -0.30%/-0.90%, all noise-level; unchanged control moved +3.11%. | REJECT; reverted |
+| Forward aligned `m=2` UB materialization | Two UB copies followed by one contiguous MTE3 write may beat two strided MTE3 descriptors. | 910B build PASS; A3 44/44 PASS. FP16 and BF16 forward `m=2` both changed `1.58 -> 1.60 us` while an unchanged control moved `1.78 -> 1.76 us`. | REJECT; reverted |
+| Backward `m=1` Cast + scalar zero Add | Cast directly into the FP32 accumulator and use in-place `Adds(+0)` to preserve negative-zero normalization while removing `Duplicate` and a binary-Add UB source. | 910B Host/FP16/BF16/ACLNN/package PASS; A3 44/44 PASS. A-B-A device-task medians were FP16 `5.84/5.14/5.56 us` and BF16 `5.90/5.16/5.62 us`; the unchanged control was `1.64/1.56/1.58 us`. Platform submission `6a89c15882cffa8f1692f149` passed 5/5 but measured `[2.12,22.62,1373.38,47.68,2.34]`, derived `89.9411` versus retained-baseline `90.6013` under the same current best vector. | REJECT after platform isolation; reverted |
+| Backward `m=1` dedicated key and true 8-byte UB footprint | Removing the now-unused converted buffer raises complete-row batch capacity from four to six for `D=4096`, potentially making each core finish in one batch. | 910B build PASS; A3 44/44 PASS. Against the retained `5.14/5.16 us`, two repeats measured FP16/BF16 at `5.90/5.98` and `5.40/5.52 us`; both remained slower after control normalization. Larger batches and the dedicated code shape outweighed the saved batch boundary. | REJECT; fully reverted |
+| Backward cross-batch first-slice prefetch | Enqueue the next complete-row batch's `k=0` input before the current batch's final output Cast to overlap one additional MTE2 transfer with Vector work. | 910B build PASS; A3 44/44 PASS. A-B-A `msprof` measured FP16 `12.48/12.42/12.28 us` and BF16 `12.44/12.38/12.26 us`; controls stayed at `1.64 us` and `3.28-3.30 us`. The candidate was about 0.3% slower than the two-side baseline mean. | REJECT; fully reverted |
+| Omit GlobalTensor binding lengths | Removing four Init-time size calculations and two length arguments may reduce Scalar setup on tiny paths; actual accesses remain bounded by Host Tiling. | 910B build PASS; A3 44/44 PASS. A-B-A small-path timings were FP16 forward `1.64/1.58/1.58 us`, BF16 forward `1.64/1.56/1.56 us`, FP16 backward `1.74/1.66/1.66 us`, and BF16 backward `1.86/1.76/1.76 us`. Candidate and after-baseline were identical, so the apparent movement was temporal drift rather than attributable gain. | REJECT; explicit binding bounds restored |
+| Compile-time forward `m=2/4/8` | Removing the runtime forward replication bound for the published multipliers might reduce Scalar issue overhead. | Harness baseline `299.8188 us`; candidate `300.853668 us` after guard, 910B build, A3 44/44 validation, and the full local performance matrix. | REJECT by Harness; fully reverted |
+| Large expanded-row sequential writes | Profiling showed forward dominated by MTE3, so disabling multi-row strided batching for expanded rows at least 32 KiB might improve sequential GM stores. | Harness guard/build/A3 44/44 PASS, but the full local matrix regressed to `305.1254 us` from the retained Harness baseline `299.8188 us`. | REJECT by Harness; fully reverted |
+| Explicitly unroll compile-time backward `m=4` | The measured Scalar ratio near `0.44` might come from the reduction loop and address generation even though MTE2/Vector overlap is already effective. | Harness guard/910B build/A3 44/44 PASS. The aggregate proxy was `301.4438 us`; same-device profile changed FP16/BF16 `[1024,4,4096]` from `12.16/12.30 us` to `12.94/12.92 us`, while Scalar remained `0.443/0.440`. | REJECT by Harness/profile; the compiler-generated loop was not the bottleneck and the explicit code was fully reverted |
+| Preload both backward `m=4` input slots at startup | Harness classified the path as MTE2/Vector-heavy, so filling both queue slots before the first Cast might reduce the startup bubble. | 910B build PASS. A3 validation stalled in `backward_boundary` before completion: after dequeuing `k0`, the code attempted to allocate `k2` before freeing the physical `k0` slot, so the two-slot queue had no allocatable buffer. The agent-owned validation process was stopped rather than waiting for its 300-second timeout. | REJECT at correctness/synchronization gate; fully reverted and not benchmarked or submitted |
+| Corrected two-slice startup preload | Compute and free the current slot before enqueuing `k+2`, preserving one-slice lookahead without over-allocating the two-slot queue. | Harness guard/910B build/A3 44/44 PASS, but the aggregate proxy was `311.473464 us`. Same-device profile changed FP16/BF16 `[1024,4,4096]` from `12.16/12.30 us` to `12.38/12.44 us`, and Scalar rose to `0.454`. | REJECT by Harness/profile; fully reverted and not submitted |
+| Forward `m=4` per-core output phase shift | Desynchronizing the four independent output-copy phases across cores might reduce synchronized GM write contention in the MTE3-bound medium path. | Harness guard/910B build/A3 44/44 PASS. The full proxy was `294.332667 us` versus the same-device `289.790065 us` baseline. Target FP16/BF16 changed `13.390/13.626 -> 13.296/13.748 us`; a later targeted repeat changed `15.000/15.252 -> 14.896/15.718 us`, again showing a dtype conflict rather than a robust gain. | REJECT; fully reverted and not submitted |
+| Forward aligned `m=4` contiguous UB materialization | Trading idle Vector/UB bandwidth for one contiguous output transfer might remove the strided MTE3 pattern. | `Adds` was rejected at 910B build because CANN 8.5 does not support BF16 `Adds`. The supported UB `DataCopy` version exposed a missing MTE2-to-Vector queue event at 42/44; a dedicated input queue fixed correctness to 44/44. The correct version still regressed the full proxy to `307.362997 us` and target FP16/BF16 to `15.038/15.322 us` from `13.390/13.626 us`. | REJECT; fully reverted and not submitted |
+| Forward `m=4` contiguous input-row descriptor | Aligned input rows are contiguous in both GM and UB, so one long MTE2 block might be cheaper than a zero-stride multi-block descriptor. | Harness guard/910B build/A3 44/44 PASS. The full proxy was `305.599665 us`; target FP16/BF16 measured `14.656/14.330 us`, with no evidence of improvement after accounting for run-to-run device drift. | REJECT; fully reverted and not submitted |
+| Forward `m=4` pipelined contiguous-output materialization | Two output slots might overlap UB replication with the previous contiguous MTE3 write and recover the cost seen in the single-slot materialization. | Harness guard/910B build/A3 44/44 PASS, but the full proxy was `308.442870 us`; target FP16/BF16 were `14.512/14.904 us`. The extra UB copy work and smaller batches remained more expensive than direct strided output. | REJECT; fully reverted and not submitted |
+| Forward `m=4` two-slot bound copy queue | Halving the row batch and using two original GM-to-UB-to-GM bound slots might overlap next-batch MTE2 with prior-batch MTE3 without extra traffic. | Harness guard/910B build/A3 44/44 PASS. The full proxy was `292.281400 us` versus the adjacent retained `284.769067 us`; target FP16/BF16 were `14.240/14.590 us` versus `13.920/14.314 us`. The second descriptor batch outweighed the achieved overlap. | REJECT; fully reverted and not submitted |
+| Forward `m=4` interleaved row ownership | Cyclic rows could make same-phase writes from adjacent cores target adjacent logical output rows and improve GM channel utilization. | Harness guard/910B build/A3 44/44 PASS. The full proxy was `299.354203 us`; target FP16/BF16 were `14.138/14.270 us` versus the adjacent retained `13.920/14.314 us`, a FP16 regression and noise-level BF16 change. | REJECT; fully reverted and not submitted |
+
+- No CANNJudge submission was made for the rejected recovery candidates. The
+  retained `m=1` candidate passed every local gate, but its first Harness
+  platform attempt stopped before login with `missing CANNJUDGE_EMAIL`; no
+  submission ID was created and no platform quota was consumed. The user has
+  subsequently authorized ten new CANNJudge submissions. The recovered direct
+  workflow created `6a89c15882cffa8f1692f149`, so **1/10** has been consumed
+  under that authorization and nine remain.
+
+### Measured Harness bottleneck diagnosis
+
+- The first profiled `diagnose` attempt on device 4 failed in
+  `aclrtSetDevice` before loading the custom operator. Harness recorded
+  `reject:profile_failed`; it is environment evidence, not a kernel
+  bottleneck result.
+- The identical profile command then completed on device 2. Harness record
+  `runs/harness/20260822T155157Z-measured-bottleneck-device2.json` reports
+  `passed:diagnosis`, confidence `profile_observed`.
+- Forward `[1024,4096],m=4` measured `12.72-12.74 us`, with MTE3 `0.643`,
+  MTE2 `0.247`, Scalar `0.125`, and Vector `0.002`. Forward
+  `[256,7168],m=8` measured `11.40 us`, with MTE3 `0.648`, MTE2 `0.227`,
+  Scalar `0.146`, and Vector `0.002`. The retained forward path is therefore
+  primarily an output-copy/GM-bandwidth path; a Cube reformulation has no
+  measured justification.
+- Backward `[1024,4,4096]` measured `12.16-12.30 us`, with MTE2
+  `0.767-0.773`, Vector `0.616-0.648`, Scalar `0.436-0.440`, and MTE3
+  `0.176-0.179`. Backward `[256,8,7168]` FP16 measured `13.08 us`, with
+  MTE2 `0.814`, Vector `0.566`, Scalar `0.608`, and MTE3 `0.100`.
+  MTE2/Vector overlap is already material; the next focused target is reducing
+  Scalar loop/address issue without removing the rolling input pipeline.
+- The diagnosis path emitted the candidate families
+  `vector.mte_v_overlap`, `vector.reduce_pass_fusion`,
+  `vector.scan_blocking`, `vector.instruction_fusion`, and
+  `common.working_set_liveness`. These are planning inputs, not proof that any
+  particular code rewrite will improve performance.
+
+### Reproducible CANNJudge submission path
+
+- The two previously successful direct submissions prove the supported path:
+  `python3 tools/agent_loop.py platform --task mhc_expand --name <candidate> --submit`.
+  The task config supplies the verified problem ID and submission source, and
+  the Harness invokes the official repository-local CANNJudge adapter. A
+  ChatGPT connector, Work Agent, or browser workflow is not part of this path.
+- The invoking process must inherit `CANNJUDGE_EMAIL` and either
+  `CANNJUDGE_CIPHERTEXT_FILE` or `CANNJUDGE_CIPHERTEXT`. The private key is
+  resolved by the official skill unless `CANNJUDGE_PRIVATE_KEY` overrides it.
+  Plaintext passwords remain prohibited, and no credential value is stored in
+  the repository or Harness record.
+- A platform run is counted against the authorization only after the adapter
+  prints `CANNJUDGE_SUBMISSION_ID=...`. A credential preflight failure before
+  that line is not a submission.
 
 ### Pipeline and matrix-path findings
 

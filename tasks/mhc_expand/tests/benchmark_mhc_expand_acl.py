@@ -223,8 +223,15 @@ def main() -> int:
     parser.add_argument("--cases", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--label", required=True)
+    parser.add_argument("--case-id", action="append", default=[])
     args = parser.parse_args()
     cases = [parse_case(case) for case in load_perf_cases(args.cases)]
+    if args.case_id:
+        requested = set(args.case_id)
+        cases = [case for case in cases if case["id"] in requested]
+        missing = requested.difference(case["id"] for case in cases)
+        if missing:
+            parser.error(f"unknown performance case id(s): {', '.join(sorted(missing))}")
     runtime = AclRuntime()
     try:
         op = MhcExpandAclnn(runtime)
