@@ -1,53 +1,68 @@
 # Xingchenbei Ascend Kernel Agent Harness
 
-A Codex-oriented harness for implementing and optimizing Ascend C competition kernels.
+A compact Codex-oriented harness for developing and optimizing Ascend C competition operators.
 
-The harness separates five concerns:
+The repository deliberately leaves ordinary engineering judgment to Codex. The Harness focuses on three things Codex should not have to remember manually:
 
-1. **Competition contract** — immutable interface, required semantics, hidden-test obligations.
-2. **Repository guardrails** — `AGENTS.md` defines what the coding agent may and may not change.
-3. **Ascend expertise** — official Ascend Agent Skills are bootstrapped into `.agents/skills/`.
-4. **CANNJudge integration** — the official `cannjudge-submit` skill provides problem/package/submission/result/ranking interaction.
-5. **Evaluation-driven optimization** — candidates must pass guard → build → correctness before benchmark/profile evidence can promote them.
+- **Ascend-specific knowledge** — `xingchen-kernel-optimizer`, design experience, bottleneck diagnosis, and optimization patterns.
+- **Mechanical evidence state** — task-scoped build/correctness/benchmark/profile records, freshness, and score comparability.
+- **High-cost safety checks** — interface/task scope, CANNJudge problem/package identity, secrets, and explicit submission authorization.
 
-The first task slot is `tasks/sparse_flash_attention/`.
+`main` is the canonical generic Harness baseline. Task branches carry operator-specific code, tests, scripts, and evidence summaries; generic Harness changes should land on `main` first and then be merged into active task branches.
 
-## Quick start on an Ascend machine
+## Start a task
+
+On an Ascend machine:
 
 ```bash
-cp config/agent.env.example config/agent.env
 bash scripts/bootstrap_skills.sh
 bash scripts/doctor.sh
-python3 tools/agent_loop.py baseline --name baseline
+
+# First Codex conversation for this task only:
+python3 tools/context_state.py bootstrap --task <task> --new-session
+
+# Inspect compact current evidence before trusting an old PASS/score:
+python3 tools/task_state.py --task <task>
 ```
 
-Open this repository root as the VS Code workspace when using the Codex extension so repository instructions and local skills are discoverable.
+Use a task-scoped config at `config/tasks/<task>.env` when available. A new task can start from `config/agent.env.example`.
 
-## Core workflow
+The normal evidence loop is:
 
-```text
-Codex edits one focused candidate
-        ↓
-interface guard (optional)
-        ↓
-build
-        ↓
-correctness
-        ↓
-benchmark
-        ↓
-profile when a concrete question remains
-        ↓
-promote / reject from measured evidence
+```bash
+python3 tools/agent_loop.py validate  --task <task>
+python3 tools/agent_loop.py baseline  --task <task> --name baseline
+python3 tools/agent_loop.py diagnose  --task <task>
+python3 tools/agent_loop.py candidate --task <task> --name <candidate> --hypothesis '<one mechanism>'
 ```
 
-`tools/agent_loop.py` records every run under `runs/` and tracks the current best score in `runs/best.json`. It never auto-reverts the working tree, so unrelated user changes are not destroyed.
+`agent_loop.py` writes runtime records under `tasks/<task>/runs/harness/`; those raw records are local/ignored. Keep durable conclusions, retained mechanisms, failed hypotheses worth remembering, and platform facts in the task documentation rather than committing repeated stdout.
 
-CANNJudge is an optional additional platform-evidence loop. `$cannjudge-submit` may be used to verify current problem/package facts, and—only with explicit user authorization—to submit and query results. Its RSA key/credential material must remain local and untracked.
+For design experience, Codex reads the compact catalog and selects relevant detail itself:
 
-## External sources
+```bash
+python3 tools/agent_loop.py design --task <task>
+python3 tools/agent_loop.py design --task <task> \
+  --select-pattern <pattern-id> \
+  --select-pattern <pattern-id>
+```
 
-- Official Ascend skills are cloned by `scripts/bootstrap_skills.sh`.
-- Official CANN `cann-learning-hub` provides `cannjudge-submit` plus its supporting `ascendc-ops-project` skill.
-- MIT Kernel Design Agents is used as optimization methodology/reference, not as NVIDIA expertise for Ascend.
-- Huawei-side repository guidance supplied for this project is distilled into the competition-safe rules in root `AGENTS.md`.
+For platform submission:
+
+```bash
+python3 tools/agent_loop.py platform --task <task> --submit
+```
+
+`--submit` is mandatory. Never store CANNJudge credentials, ciphertext, or private keys in tracked config.
+
+## Evidence semantics
+
+A historical result is not automatically evidence for the current tree.
+
+`tools/evidence_fingerprint.py` binds a run to implementation, relevant gate/case/config context, non-secret Ascend environment identity, and stage commands. `tools/task_state.py` reports old evidence as `fresh`, `stale`, or `unknown`.
+
+Benchmark scores are compared only when their benchmark contexts are compatible. Source changes may make correctness evidence stale without making the previous benchmark baseline incomparable. Platform score evidence is additionally bound to the current official CANNJudge package SHA when platform identity is checked.
+
+## External knowledge
+
+`scripts/bootstrap_skills.sh` installs official Ascend/CANN skills and KDA references into local ignored paths. Generated symlinks are intentionally not tracked, so cloning or using Git linked worktrees does not bake one machine's absolute paths into the repository.

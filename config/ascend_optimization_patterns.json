@@ -1,0 +1,240 @@
+{
+  "version": 2,
+  "description": "Compact research-derived Ascend optimization patterns. They are hypotheses gated by target CANN/SOC evidence, correctness and same-case measurement.",
+  "classes": {
+    "vector": {
+      "resource_model": ["S", "MTE2", "V", "MTE3", "UB"],
+      "canonical_flow": "GM -> UB -> V -> UB -> GM"
+    },
+    "cube": {
+      "resource_model": ["S", "MTE2", "L1", "MTE1", "L0A/L0B", "M", "L0C", "FIX"],
+      "canonical_flow": "GM -> L1 -> L0 -> Cube -> L0C/FIX -> GM"
+    },
+    "mixed_cv": {
+      "resource_model": ["AIC/Cube", "AIV/Vector", "MTE", "L1/UB", "workspace", "cross-core sync"],
+      "canonical_flow": "Cube and Vector exchange staged tiles while adjacent independent work overlaps"
+    }
+  },
+  "patterns": [
+    {
+      "id": "common.multicore_balance",
+      "title": "Balance useful work across physical cores",
+      "classes": ["all"],
+      "tier": "core",
+      "tags": ["underutilization", "latency"],
+      "when": "legal independent work exists but task count or partition leaves cores idle or badly imbalanced",
+      "try": "change logical task granularity or split an additional independent axis; preserve contiguous ownership where possible",
+      "avoid": "oversharding tiny work or splitting a true recurrence/dependency chain",
+      "evidence": ["CATLASS", "flash-linear-attention-npu"]
+    },
+    {
+      "id": "common.dependency_aware_partition",
+      "title": "Keep recurrence chains local; parallelize orthogonal axes",
+      "classes": ["all"],
+      "tier": "core",
+      "tags": ["pipeline", "synchronization", "underutilization"],
+      "when": "one axis has true cross-step state dependency while sequence/head/row/other axes remain independent",
+      "try": "assign the full dependency chain to one task/core and parallelize independent axes or small independent windows",
+      "avoid": "cross-core state handoff per recurrence step unless the dependency graph requires it",
+      "evidence": ["flash-linear-attention-npu", "TileLang-Ascend"]
+    },
+    {
+      "id": "common.working_set_liveness",
+      "title": "Size buffers/rings from live ranges and cache fit",
+      "classes": ["all"],
+      "tier": "core",
+      "tags": ["memory", "pipeline", "cache"],
+      "when": "multi-buffer/ring/workspace depth is fixed, on-chip/cache pressure is high, or extra buffering stops helping",
+      "try": "derive stage/ring depth from simultaneous live values and dependency distance; alias dead temporaries and keep only asynchronously accessed buffers multi-buffered",
+      "avoid": "assuming more stages/buffers are always faster; do not double-buffer V-only temporaries without an async hazard",
+      "evidence": ["flash-linear-attention-npu", "flash-attention-npu", "TileLang-Ascend", "CATLASS"]
+    },
+    {
+      "id": "common.locality_schedule",
+      "title": "Schedule for cache reuse and bandwidth deconfliction",
+      "classes": ["all"],
+      "tier": "core",
+      "tags": ["memory", "bandwidth", "cache"],
+      "when": "neighbor tasks reuse common data or many cores hit the same GM region at the same phase",
+      "try": "evaluate grouped/swizzled task order for L2/L1 reuse and phase-shift independent traversal to avoid synchronized read conflicts",
+      "avoid": "reordering across semantic dependencies or hard-coding a swizzle without shape evidence",
+      "evidence": ["CATLASS", "Triton-Ascend"]
+    },
+    {
+      "id": "common.fuse_fragmented_staging",
+      "title": "Assemble fragmented data directly in on-chip staging",
+      "classes": ["all"],
+      "tier": "core",
+      "tags": ["memory", "bandwidth", "sparse"],
+      "when": "paged/sparse/indexed input is gathered into a GM intermediate before compute",
+      "try": "walk indices/pages and assemble the compute tile directly into UB/L1, then consume it without a GM materialization",
+      "avoid": "random tiny transfers whose issue cost exceeds saved traffic; preserve legal alignment/tails",
+      "evidence": ["flash-attention-npu", "TileLang-Ascend"]
+    },
+    {
+      "id": "common.remove_scalar_overhead",
+      "title": "Remove scalar/control work from short hot kernels",
+      "classes": ["all"],
+      "tier": "core",
+      "tags": ["scalar", "latency"],
+      "when": "generic schedulers, div/mod, address math, tiny loops or repeated sync issue dominate a short kernel",
+      "try": "hoist invariants, use incremental indices, simplify one-task-per-core regimes, batch synchronization where dependencies allow",
+      "avoid": "large code duplication for regimes that are not measurably scalar-bound",
+      "evidence": ["CATLASS", "TileLang-Ascend"]
+    },
+    {
+      "id": "common.regime_autotune",
+      "title": "Use bounded shape-regime autotuning",
+      "classes": ["all"],
+      "tier": "core",
+      "tags": ["tiling", "underutilization", "memory", "compute"],
+      "when": "different shape/dtype/layout regimes prefer different tile/stage/schedule parameters",
+      "try": "define a small hardware-pruned candidate set keyed by performance-relevant runtime attributes and benchmark same-case candidates",
+      "avoid": "blind combinatorial search, fixed public-shape hardcoding, or using A3 winners as authoritative 910B winners",
+      "evidence": ["CATLASS", "Triton-Ascend"]
+    },
+    {
+      "id": "common.hardware_path_audit",
+      "title": "Audit generated hardware paths by dtype/shape",
+      "classes": ["all"],
+      "tier": "advanced",
+      "tags": ["compute", "scalar", "bandwidth"],
+      "when": "a supported dtype/shape unexpectedly underperforms or generated code may fall back to scalar/slow conversion paths",
+      "try": "inspect generated target code/API template branch, then select a semantically safe hardware-backed copy/cast/reinterpret/specialized path",
+      "avoid": "assuming API names imply identical hardware paths across dtype, shape, CANN or SOC",
+      "evidence": ["TileLang-Ascend", "CATLASS"]
+    },
+    {
+      "id": "vector.mte_v_overlap",
+      "title": "Pipeline MTE2/V/MTE3 across adjacent tiles",
+      "classes": ["vector"],
+      "tier": "core",
+      "tags": ["pipeline", "memory", "bandwidth"],
+      "when": "CopyIn -> Vector -> CopyOut is effectively serial and multiple independent tiles exist",
+      "try": "use producer/consumer queues or explicit ping-pong with prologue/main/epilogue so next input, current compute and previous output overlap",
+      "avoid": "buffering tiny tiles, exceeding UB, or adding barriers that recreate serialization",
+      "evidence": ["TileLang-Ascend", "CATLASS"]
+    },
+    {
+      "id": "vector.reduce_pass_fusion",
+      "title": "Fuse repeated full scans of a reduction axis",
+      "classes": ["vector"],
+      "tier": "core",
+      "tags": ["memory", "bandwidth", "compute"],
+      "when": "a long reduction axis exceeds UB and the algorithm scans it multiple times for related statistics",
+      "try": "derive an online/corrected formulation that maintains sufficient FP32 state and reduces GM passes",
+      "avoid": "changing numerical semantics or applying when scans are mathematically independent",
+      "evidence": ["TileLang-Ascend"]
+    },
+    {
+      "id": "vector.scan_blocking",
+      "title": "Batch serial scan steps in UB and vectorize the orthogonal axis",
+      "classes": ["vector"],
+      "tier": "core",
+      "tags": ["memory", "scalar", "pipeline"],
+      "when": "a true serial scan repeatedly round-trips each step through GM but independent rows/columns exist",
+      "try": "load several scan steps into UB, carry state locally across the block, vectorize the orthogonal independent dimension, then write once",
+      "avoid": "parallelizing the dependency axis or choosing a block that evicts required running state",
+      "evidence": ["TileLang-Ascend", "flash-linear-attention-npu"]
+    },
+    {
+      "id": "vector.instruction_fusion",
+      "title": "Vectorize scalar loops and use compound vector operations",
+      "classes": ["vector"],
+      "tier": "core",
+      "tags": ["scalar", "compute", "latency"],
+      "when": "many scalar/slice operations implement an elementwise pattern expressible as a vector tile or compound instruction",
+      "try": "broadcast once, operate on whole tiles, and use supported fused operations when they preserve exact required semantics",
+      "avoid": "extra broadcast/temp traffic that outweighs dispatch savings or precision-changing algebra",
+      "evidence": ["TileLang-Ascend"]
+    },
+    {
+      "id": "vector.microapi_register_kernel",
+      "title": "Use MicroAPI register microkernels for proven vector hotspots",
+      "classes": ["vector"],
+      "tier": "advanced",
+      "tags": ["compute", "latency", "scalar"],
+      "when": "profile shows a stable tiny vector inner loop remains instruction/dispatch-bound after higher-level fixes and target API supports MicroAPI",
+      "try": "use RegTensor/MaskReg-level SIMD helpers, explicit cast traits and register-resident intermediates for the inner microkernel",
+      "avoid": "prematurely replacing maintainable AscendC APIs, unsupported CANN/SOC paths, or losing tail/precision coverage",
+      "evidence": ["flash-linear-attention-npu"]
+    },
+    {
+      "id": "cube.preload_pipeline",
+      "title": "Preload across output-block boundaries",
+      "classes": ["cube"],
+      "tier": "core",
+      "tags": ["pipeline", "memory"],
+      "when": "ping-pong overlaps inner K tiles but MTE2 still has bubbles between consecutive output blocks",
+      "try": "move next block GM->L1 work into the current block lifetime and explicitly model prologue/main/drain",
+      "avoid": "preloading data that shortens useful residency or exceeds L1/event capacity",
+      "evidence": ["CATLASS", "flash-linear-attention-npu"]
+    },
+    {
+      "id": "cube.asymmetric_residency",
+      "title": "Keep the reusable operand resident; stream the other side",
+      "classes": ["cube"],
+      "tier": "core",
+      "tags": ["memory", "bandwidth", "cache"],
+      "when": "one operand tile is reused across multiple opposite-axis iterations and fits L1",
+      "try": "load the reusable side once, keep it resident, pipeline the streaming side, and choose task order/swizzle to maximize reuse",
+      "avoid": "multi-buffering the resident operand without need or sacrificing too much parallelism for residency",
+      "evidence": ["CATLASS", "flash-attention-npu", "TileLang-Ascend"]
+    },
+    {
+      "id": "cube.split_axis_for_occupancy",
+      "title": "Split a reduction axis when output tiles underfill Cube cores",
+      "classes": ["cube"],
+      "tier": "core",
+      "tags": ["underutilization", "compute", "memory"],
+      "when": "M/N output tiles are fewer than useful AIC cores while the reduction axis is large enough to split",
+      "try": "evaluate split-K or equivalent extra parallelism, including reduce/atomic/writeback cost in the model",
+      "avoid": "trading a small utilization gain for large extra writes/reduction overhead",
+      "evidence": ["CATLASS", "TileLang-Ascend"]
+    },
+    {
+      "id": "mixed_cv.credit_window",
+      "title": "Decouple Cube/Vector with a bounded credit window",
+      "classes": ["mixed_cv"],
+      "tier": "core",
+      "tags": ["pipeline", "synchronization", "latency"],
+      "when": "per-task ready/wait or reverse-flag handshake forces near lockstep although producer may safely lead consumer",
+      "try": "use a counting-credit protocol so producer may lead by N tasks; derive N from true dependency distance and workspace capacity",
+      "avoid": "unbounded producer lead, stale-slot overwrite, or copying another kernel's fixed credit count",
+      "evidence": ["flash-linear-attention-npu"]
+    },
+    {
+      "id": "mixed_cv.sync_batch",
+      "title": "Batch cross-core synchronization at legal intervals",
+      "classes": ["mixed_cv"],
+      "tier": "core",
+      "tags": ["synchronization", "scalar", "pipeline"],
+      "when": "cross-core flag issue/wait occurs every tile and synchronization overhead or bubbles are visible",
+      "try": "signal/consume groups of ready tiles with a tail flush, choosing interval from dependency and storage bounds",
+      "avoid": "delaying a dependency past the consumer point or omitting final partial-group signaling",
+      "evidence": ["TileLang-Ascend"]
+    },
+    {
+      "id": "mixed_cv.workspace_liveness_ring",
+      "title": "Derive C/V workspace rings from liveness and cache fit",
+      "classes": ["mixed_cv"],
+      "tier": "core",
+      "tags": ["memory", "cache", "pipeline"],
+      "when": "workspace ring is fixed/maximal, producer-consumer stages have different live windows, or larger rings increase cache misses",
+      "try": "separate long-lived and short-lived temporaries, size each ring from its live window, and keep the working set cache-friendly",
+      "avoid": "one global ring depth for all temporaries or treating deeper rings as monotonic improvement",
+      "evidence": ["flash-linear-attention-npu", "TileLang-Ascend"]
+    },
+    {
+      "id": "mixed_cv.internal_fusion",
+      "title": "Avoid GM materialization between Cube and Vector stages",
+      "classes": ["mixed_cv"],
+      "tier": "advanced",
+      "tags": ["memory", "bandwidth", "pipeline"],
+      "when": "a tile-local Cube result is written to GM/workspace and immediately consumed by Vector, and target mechanisms allow closer handoff",
+      "try": "evaluate on-chip/direct handoff or the nearest legal staged buffer and synchronize only true producer-consumer edges",
+      "avoid": "unsupported target paths, excessive on-chip pressure, or coupling that narrows legal shapes",
+      "evidence": ["flash-linear-attention-npu", "TileLang-Ascend"]
+    }
+  ]
+}
