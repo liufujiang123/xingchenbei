@@ -11,12 +11,8 @@ struct SparseFlashAttentionTilingData {
     uint64_t sparseSize;
     uint64_t totalRows;
 
-    uint32_t queryDtype;
-    uint32_t keyDtype;
-    uint32_t valueDtype;
-    uint32_t queryRopeDtype;
-    uint32_t keyRopeDtype;
-
+    uint32_t queryRopeIsFloat;
+    uint32_t keyRopeIsFloat;
     uint32_t hasActualQueryLen;
     uint32_t hasActualKvLen;
     uint32_t sparseBlockSize;
