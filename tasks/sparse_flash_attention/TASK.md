@@ -1,6 +1,6 @@
 # SparseFlashAttention task contract
 
-Status: contest ABI resolved from the checked-in competition template; correctness baseline implementation is in progress.
+Status: verified problem identity and submission transport; CANN 8.5 compilation and local A3 correctness pass, but CANNJudge Host GetWorkspace remains blocked by platform contract inconsistency.
 
 ## Authoritative sources
 
@@ -13,6 +13,17 @@ For this task use, in order:
 
 The previously investigated `DsaSfa` package is not the template for this contest instance and must not be used to redefine this task.
 
+Verified CANNJudge provenance on 2026-08-23:
+
+- contest ID: `6a7bf087a52e0f540a88e167`;
+- public problem ID: `303`;
+- internal problem ID: `6a7c22d6a52e0f540a8a098d`;
+- live problem name: `sparseflashattention`;
+- fresh package filename: `SparseFlashAttention_problem_303_template.zip`;
+- fresh package SHA-256: `b87832774789b2d1f9c23a4418d688d43a7085a4cb030572c74c23dd9012ef9a`.
+
+The fresh package preserves the same names, ordering, optionality, defaults, target, and FP16/FP32 OpDef as the original checked-in skeleton. The checked-in Host/Kernel/Tiling files intentionally differ because they contain the implementation.
+
 ## Contest-visible operator interface
 
 Registered operator: `SparseFlashAttention`
@@ -23,20 +34,20 @@ Required/optional inputs, in the exact template order:
 
 | Pos | Name | Presence | Template dtype | Logical shape |
 |---:|---|---|---|---|
-| 0 | `query` | required | float16 / float32 | `(B, Q_S, Q_N, 512)` |
-| 1 | `key` | required | float16 / float32 | `(B, KV_S, 1, 512)` |
-| 2 | `value` | required | float16 / float32 | `(B, KV_S, 1, 512)` |
+| 0 | `query` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, Q_S, Q_N, 512)` |
+| 1 | `key` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, KV_S, 1, 512)` |
+| 2 | `value` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, KV_S, 1, 512)` |
 | 3 | `sparse_indices` | required | int32 | `(B, Q_S, 1, sparse_size)` |
 | 4 | `actual_seq_lengths_query` | optional | int32 | `(B,)` |
 | 5 | `actual_seq_lengths_kv` | optional | int32 | `(B,)` |
-| 6 | `query_rope` | required | float16 / float32 | `(B, Q_S, Q_N, 64)` |
-| 7 | `key_rope` | required | float16 / float32 | `(B, KV_S, 1, 64)` |
+| 6 | `query_rope` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, Q_S, Q_N, 64)` |
+| 7 | `key_rope` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, KV_S, 1, 64)` |
 
 Outputs, in exact template order:
 
 | Pos | Name | Presence | Template dtype | Logical shape |
 |---:|---|---|---|---|
-| 0 | `attention_out` | required | float16 / float32 | `(B, Q_S, Q_N, 512)` |
+| 0 | `attention_out` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, Q_S, Q_N, 512)` |
 | 1 | `softmax_max_out` | optional | float32 | `(B, 1, Q_S, Q_N)` |
 | 2 | `softmax_sum_out` | optional | float32 | `(B, 1, Q_S, Q_N)` |
 
@@ -128,9 +139,9 @@ The input shape still contains one sparse-index row per physical query token. Th
 
 ## Dtype contract
 
-The statement describes float16/bfloat16 logical data, while the contest template currently declares float16/float32. The submission must preserve the contest template declaration. The current baseline therefore implements the template's float16/float32 paths and does not silently add BF16 to the public interface.
+The live statement describes float16/bfloat16, while the fresh official package declares float16/float32. Three platform submissions all failed before Kernel launch with `aclnnSparseFlashAttentionGetWorkspaceSize(...)=561002`, including separate FP16/FP32 and FP16/BF16 variants. This proves the package and evaluator cannot currently be reconciled by choosing either second dtype alone, but it does not expose which input check failed.
 
-`query`, `key`, and `value` are required to share dtype. The baseline permits the two RoPE tensors to independently be float16 or float32 as allowed by the template.
+The retained compatibility baseline accepts float16, bfloat16, and float32 without changing names, positions, shapes, optionality, or semantics. `query`, `key`, and `value` must still share dtype; RoPE tensors may independently use any accepted primary dtype. BF16 is converted to/from FP32 arithmetic through explicit IEEE bit conversion because the CANN 8.5 910B compiler rejects scalar `bfloat16_t` casts.
 
 ## Current baseline implementation
 
@@ -140,13 +151,15 @@ The first implementation is intentionally correctness-oriented:
 - sparse K/V and RoPE rows are read directly from GM;
 - score dot products accumulate in float32;
 - stable online softmax maintains a running max and denominator;
-- each AIV core owns a reusable `512 * float32` workspace accumulator for the row it is currently processing;
-- workspace size is `usedCoreNum * 512 * sizeof(float)` and does not grow with sequence length or sparse size;
+- each AIV core owns a reusable `512 * float32` UB accumulator for the row it is currently processing;
+- Host Tiling still reserves `usedCoreNum * 512 * sizeof(float)` compatibility workspace, but the kernel does not access it;
 - the final normalized accumulator is cast once into `attention_out`;
 - scalar exponential approximation with range reduction;
+- scalar GM outputs are explicitly cache-cleaned before row completion;
+- auxiliary-output mode uses one AIV core to avoid cross-core cache-line false sharing;
 - no Cube batching, UB gather aggregation, or performance tuning yet.
 
-The implementation is not considered validated until it successfully builds under the contest-compatible CANN toolchain and passes the actual correctness evaluator.
+The implementation builds under CANN 8.5 for `ascend910b` with three dtype binaries. A temporary target-only `ascend910_93` mirror passed 11/11 deterministic local ACLNN/NumPy cases, including direct ACL_BF16 storage and FP32. Platform correctness is blocked before Kernel launch.
 
 ## Remaining correctness questions for evaluator evidence
 
@@ -159,6 +172,8 @@ The public statement/template do not completely specify:
 - whether block-wise mode requires any additional row remapping beyond the provided `sparse_indices` tensor;
 - numerical tolerance and exceptional-value policy;
 - whether all declared float32 paths are exercised by the contest.
+- the exact legal platform input rejected as `561002`, or the corresponding Host/GE diagnostic log;
+- whether the evaluator expects the fresh package's FP32 second dtype, the statement's BF16 second dtype, or another generated-ACLNN contract.
 
 These uncertainties must not be resolved by changing the public ABI. Use build/runtime/CANNJudge evidence to refine only internal behavior.
 

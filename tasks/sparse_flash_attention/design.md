@@ -1,6 +1,6 @@
 # SparseFlashAttention design
 
-Status: contest ABI aligned; scalar correctness baseline implemented; build/validation pending.
+Status: scalar correctness baseline builds on CANN 8.5 and passes the local A3 matrix; platform Host contract remains unresolved after three correctly targeted submissions.
 
 ## 1. Contract boundary
 
@@ -68,11 +68,11 @@ Host Tiling currently:
 1. validates rank-4 logical tensors and rank-1 optional actual-length tensors;
 2. derives `B`, `Q_S`, `KV_S`, `Q_N`, and `sparse_size` from runtime shapes;
 3. validates fixed dimensions `D=512`, `Dr=64`, `KV_N=1`;
-4. validates `query/key/value` dtype agreement and the template's float16/float32 domain;
+4. validates `query/key/value` dtype agreement and the reconciled float16/bfloat16/float32 compatibility domain;
 5. reads all five attributes;
 6. records presence of optional actual-length tensors;
-7. records independent RoPE dtype flags;
-8. launches `min(B*Q_S*Q_N, available_AIV_cores)` cores;
+7. records independent primary/RoPE BF16 and FP32 dtype flags;
+8. launches `min(B*Q_S*Q_N, available_AIV_cores)` cores without auxiliary outputs and one core when auxiliary outputs are enabled;
 9. requests `usedCoreNum * 512 * sizeof(float)` workspace bytes.
 
 The TilingData contains only internal runtime facts and does not alter the public interface.
@@ -116,12 +116,14 @@ The first implementation deliberately favors transparency over performance:
 - direct scalar GM reads for query/key/value/RoPE/index tensors;
 - float32 dot-product accumulation;
 - float32 online-softmax state;
-- one reusable 512-float workspace accumulator per active AIV core;
+- one reusable 512-float UB accumulator per active AIV core;
 - the accumulator remains float32 for the entire sparse loop and is cast to output dtype only once after normalization;
+- scalar GM output writes are cache-cleaned before a row completes;
+- auxiliary-output mode is single-core to prevent adjacent float32 rows from being written back from stale per-core copies of the same cache line;
 - scalar exponential approximation using ln(2) range reduction and an eighth-order Taylor polynomial;
 - no UB queueing, no L1/L0 staging, no Cube matmul.
 
-The workspace is bounded by core count rather than sequence length:
+Host Tiling retains the bounded compatibility workspace request, although the corrected kernel accumulator now resides in per-core UB:
 
 ```text
 workspace_bytes = usedCoreNum * 512 * sizeof(float)
@@ -143,7 +145,7 @@ when optional output descriptors are present.
 
 `InferDataType` sets `attention_out` to query dtype and both auxiliary outputs to float32.
 
-The template-visible dtype declarations remain unchanged: float16/float32 for primary tensors and float32 for auxiliary outputs.
+The live package exposes float16/float32 while the live statement exposes float16/bfloat16. The retained OpDef accepts their union, float16/bfloat16/float32, and keeps auxiliary outputs float32. This compatibility extension is driven by contradictory platform evidence, not by a mathematical requirement.
 
 ## 8. Variable lengths and masking
 
@@ -172,10 +174,11 @@ No extra `q / sparse_block_size` remapping is introduced without evaluator evide
 Current policy:
 
 - query/key/value and RoPE loads are converted to float32 for arithmetic;
+- BF16 storage is decoded/encoded with explicit round-to-nearest-even bit conversion, avoiding unsupported CANN 8.5 scalar BF16 casts;
 - content and RoPE dot products accumulate in float32;
 - the supplied `scale_value` is converted through float16 once in the kernel before use, matching the task statement's explicit scale-precision requirement;
 - online-softmax max/sum are float32;
-- the full 512-wide weighted-value numerator remains float32 in the per-core workspace;
+- the full 512-wide weighted-value numerator remains float32 in the per-core UB accumulator;
 - `attention_out` is cast to query dtype only after final normalization.
 
 The main remaining numerical approximation is scalar `exp`. If evaluator precision is close but not sufficient, the first precision change should replace this approximation with the Ascend Vector `Exp` path without changing the row algorithm.
@@ -189,27 +192,37 @@ The main remaining numerical approximation is scalar `exp`. If evaluator precisi
 | padded query row | zero output | verify evaluator convention |
 | block-wise selection | consume provided row directly | verify block-size cases |
 | scalar exp approximation | high-order range-reduced polynomial | replace with Ascend Vector Exp if precision fails |
-| float32 template path | implemented for content tensors | confirm platform actually tests it |
-| BF16 statement/template mismatch | do not alter public template | follow contest template/evaluator |
+| package FP32 vs statement BF16 mismatch | accept the union internally | platform still rejects before Tiling/Kernel diagnosis is visible |
+| platform GetWorkspace `561002` | all three public cases fail before Kernel | require legal input metadata or Host/GE diagnostic from platform |
 
-## 12. Build and validation plan
+## 12. Local correctness evidence
 
-Next actions on the server:
+The CANN 8.5 local-A3 flow builds a temporary source mirror whose only target changes are `ascend910b` to `ascend910_93` in CMake and OpDef registration. The official source remains `ascend910b`.
 
-1. build this exact branch with the contest-compatible CANN 8.5/910B path already established by the mature harness;
-2. use `ascendc-operator-compile-debug` only to make the smallest API/compiler fixes;
-3. do not change the public interface or baseline mathematics to silence compiler errors;
-4. add a local CPU/Python reference test for small shapes if the generated ACLNN package can be invoked;
-5. validate nonzero RoPE, sparse-mode 0/3, optional lengths, multiple query heads, and optional LSE outputs;
-6. only after correctness evidence, submit/benchmark and start performance work.
+Direct ACLNN invocation loads the generated `libcust_opapi.so` and compares NPU results with an independent NumPy reference. The deterministic matrix passed 11/11 cases covering basic FP16 dataflow, shared KV heads, invalid sparse suffixes, nonzero RoPE, optional actual lengths, right-down causal mode with unequal sequence lengths, auxiliary outputs enabled/disabled, FP32, and direct ACL_BF16 tensors. No NaN or Inf values were observed.
 
-No build, runtime, or correctness result is claimed in this document yet.
+The local failures that led to the retained fixes were:
 
-## 13. Optimization directions after correctness
+1. direct scalar writes to the per-core GM workspace caused AIV error `507035`; moving the same float32 accumulator lifetime into a per-core UB `TBuf` removed the exception;
+2. adjacent auxiliary rows written by different cores shared cache lines and overwrote one another during cache writeback; explicit output cache cleaning plus single-core auxiliary mode removed the false sharing.
+
+## 13. Build and validation plan
+
+Completed locally:
+
+1. CANN 8.5 `ascend910b` compilation;
+2. temporary target-only A3 build and direct ACLNN invocation;
+3. independent-reference validation of nonzero RoPE, sparse modes 0/3, optional lengths, multiple query heads, optional LSE outputs, and FP16/BF16/FP32 paths;
+4. CANNJudge doctor identity check for contest/public/internal IDs;
+5. three valid platform submissions, each returning a submission ID and the same pre-Kernel `GetWorkspaceSize` error on all three public testcase references.
+
+No further platform upload is justified until the evaluator provides the rejected input contract or a Host/GE diagnostic identifying the failed check. Performance work remains blocked until platform correctness reaches Kernel execution.
+
+## 14. Optimization directions after correctness
 
 Once the scalar baseline passes, likely high-impact dimensions are:
 
-- move Q/Q-RoPE and the FP32 output accumulator into UB;
+- move Q/Q-RoPE into UB and vectorize the existing FP32 UB accumulator updates;
 - aggregate contiguous sparse-index runs before GM copy;
 - gather K/K-RoPE/V in sparse tiles;
 - compute multiple sparse scores with Cube/Matmul/MMAD instead of scalar dots;

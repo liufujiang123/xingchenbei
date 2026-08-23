@@ -18,20 +18,20 @@ constexpr int64_t DEFAULT_SPARSE_BLOCK_SIZE = 1;
 constexpr int64_t DEFAULT_SPARSE_MODE = 3;
 constexpr int64_t DEFAULT_ATTENTION_MODE = 2;
 
-bool IsFloatTensorType(ge::DataType dtype) {
-    return dtype == ge::DT_FLOAT16 || dtype == ge::DT_FLOAT;
+bool IsSupportedTensorType(ge::DataType dtype) {
+    return dtype == ge::DT_FLOAT16 || dtype == ge::DT_BF16 || dtype == ge::DT_FLOAT;
 }
 
 bool IsPowerOfTwo(int64_t value) {
     return value > 0 && (value & (value - 1)) == 0;
 }
 
-bool ReadRank4Shape(const gert::Tensor *tensor, int64_t &d0, int64_t &d1,
+bool ReadRank4Shape(const gert::StorageShape *storageShape, int64_t &d0, int64_t &d1,
                     int64_t &d2, int64_t &d3) {
-    if (tensor == nullptr) {
+    if (storageShape == nullptr) {
         return false;
     }
-    const gert::Shape &shape = tensor->GetStorageShape();
+    const gert::Shape &shape = storageShape->GetStorageShape();
     if (shape.GetDimNum() != 4) {
         return false;
     }
@@ -91,16 +91,28 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
         return ge::GRAPH_FAILED;
     }
 
-    const gert::Tensor *query = context->GetRequiredInputTensor(0);
-    const gert::Tensor *key = context->GetRequiredInputTensor(1);
-    const gert::Tensor *value = context->GetRequiredInputTensor(2);
-    const gert::Tensor *sparseIndices = context->GetRequiredInputTensor(3);
-    const gert::Tensor *actualQueryLen = context->GetOptionalInputTensor(4);
-    const gert::Tensor *actualKvLen = context->GetOptionalInputTensor(5);
-    const gert::Tensor *queryRope = context->GetRequiredInputTensor(6);
-    const gert::Tensor *keyRope = context->GetRequiredInputTensor(7);
-    if (query == nullptr || key == nullptr || value == nullptr || sparseIndices == nullptr ||
-        queryRope == nullptr || keyRope == nullptr) {
+    const gert::StorageShape *queryShape = context->GetRequiredInputShape(0);
+    const gert::StorageShape *keyShape = context->GetRequiredInputShape(1);
+    const gert::StorageShape *valueShape = context->GetRequiredInputShape(2);
+    const gert::StorageShape *sparseShape = context->GetRequiredInputShape(3);
+    const gert::StorageShape *actualQueryShape = context->GetOptionalInputShape(4);
+    const gert::StorageShape *actualKvShape = context->GetOptionalInputShape(5);
+    const gert::StorageShape *queryRopeShape = context->GetRequiredInputShape(6);
+    const gert::StorageShape *keyRopeShape = context->GetRequiredInputShape(7);
+    const gert::CompileTimeTensorDesc *queryDesc = context->GetRequiredInputDesc(0);
+    const gert::CompileTimeTensorDesc *keyDesc = context->GetRequiredInputDesc(1);
+    const gert::CompileTimeTensorDesc *valueDesc = context->GetRequiredInputDesc(2);
+    const gert::CompileTimeTensorDesc *sparseDesc = context->GetRequiredInputDesc(3);
+    const gert::CompileTimeTensorDesc *actualQueryDesc = context->GetOptionalInputDesc(4);
+    const gert::CompileTimeTensorDesc *actualKvDesc = context->GetOptionalInputDesc(5);
+    const gert::CompileTimeTensorDesc *queryRopeDesc = context->GetRequiredInputDesc(6);
+    const gert::CompileTimeTensorDesc *keyRopeDesc = context->GetRequiredInputDesc(7);
+    if (queryShape == nullptr || keyShape == nullptr || valueShape == nullptr ||
+        sparseShape == nullptr || queryRopeShape == nullptr || keyRopeShape == nullptr ||
+        queryDesc == nullptr || keyDesc == nullptr || valueDesc == nullptr ||
+        sparseDesc == nullptr || queryRopeDesc == nullptr || keyRopeDesc == nullptr ||
+        (actualQueryShape == nullptr) != (actualQueryDesc == nullptr) ||
+        (actualKvShape == nullptr) != (actualKvDesc == nullptr)) {
         return ge::GRAPH_FAILED;
     }
 
@@ -129,12 +141,12 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     int64_t krn = 0;
     int64_t krd = 0;
 
-    if (!ReadRank4Shape(query, b, qs, qn, qd) ||
-        !ReadRank4Shape(key, kb, kvs, kvn, kd) ||
-        !ReadRank4Shape(value, vb, vks, vkn, vd) ||
-        !ReadRank4Shape(sparseIndices, ib, iqs, ikvn, sparseSize) ||
-        !ReadRank4Shape(queryRope, qrb, qrqs, qrqn, qrd) ||
-        !ReadRank4Shape(keyRope, krb, krks, krn, krd)) {
+    if (!ReadRank4Shape(queryShape, b, qs, qn, qd) ||
+        !ReadRank4Shape(keyShape, kb, kvs, kvn, kd) ||
+        !ReadRank4Shape(valueShape, vb, vks, vkn, vd) ||
+        !ReadRank4Shape(sparseShape, ib, iqs, ikvn, sparseSize) ||
+        !ReadRank4Shape(queryRopeShape, qrb, qrqs, qrqn, qrd) ||
+        !ReadRank4Shape(keyRopeShape, krb, krks, krn, krd)) {
         return ge::GRAPH_FAILED;
     }
 
@@ -148,30 +160,30 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
         return ge::GRAPH_FAILED;
     }
 
-    const ge::DataType queryDtype = query->GetDataType();
-    const ge::DataType keyDtype = key->GetDataType();
-    const ge::DataType valueDtype = value->GetDataType();
-    const ge::DataType sparseDtype = sparseIndices->GetDataType();
-    const ge::DataType queryRopeDtype = queryRope->GetDataType();
-    const ge::DataType keyRopeDtype = keyRope->GetDataType();
-    if (!IsFloatTensorType(queryDtype) || !IsFloatTensorType(keyDtype) ||
-        !IsFloatTensorType(valueDtype) || !IsFloatTensorType(queryRopeDtype) ||
-        !IsFloatTensorType(keyRopeDtype) || sparseDtype != ge::DT_INT32 ||
+    const ge::DataType queryDtype = queryDesc->GetDataType();
+    const ge::DataType keyDtype = keyDesc->GetDataType();
+    const ge::DataType valueDtype = valueDesc->GetDataType();
+    const ge::DataType sparseDtype = sparseDesc->GetDataType();
+    const ge::DataType queryRopeDtype = queryRopeDesc->GetDataType();
+    const ge::DataType keyRopeDtype = keyRopeDesc->GetDataType();
+    if (!IsSupportedTensorType(queryDtype) || !IsSupportedTensorType(keyDtype) ||
+        !IsSupportedTensorType(valueDtype) || !IsSupportedTensorType(queryRopeDtype) ||
+        !IsSupportedTensorType(keyRopeDtype) || sparseDtype != ge::DT_INT32 ||
         queryDtype != keyDtype || queryDtype != valueDtype) {
         return ge::GRAPH_FAILED;
     }
 
-    if (actualQueryLen != nullptr) {
-        const gert::Shape &shape = actualQueryLen->GetStorageShape();
+    if (actualQueryShape != nullptr) {
+        const gert::Shape &shape = actualQueryShape->GetStorageShape();
         if (shape.GetDimNum() != 1 || shape.GetDim(0) != b ||
-            actualQueryLen->GetDataType() != ge::DT_INT32) {
+            actualQueryDesc->GetDataType() != ge::DT_INT32) {
             return ge::GRAPH_FAILED;
         }
     }
-    if (actualKvLen != nullptr) {
-        const gert::Shape &shape = actualKvLen->GetStorageShape();
+    if (actualKvShape != nullptr) {
+        const gert::Shape &shape = actualKvShape->GetStorageShape();
         if (shape.GetDimNum() != 1 || shape.GetDim(0) != b ||
-            actualKvLen->GetDataType() != ge::DT_INT32) {
+            actualKvDesc->GetDataType() != ge::DT_INT32) {
             return ge::GRAPH_FAILED;
         }
     }
@@ -202,11 +214,17 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     }
 
     auto platform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
-    const int32_t coreNumAiv = platform.GetCoreNumAiv();
-    if (coreNumAiv <= 0) {
-        return ge::GRAPH_FAILED;
-    }
-    const uint64_t usedCore64 = std::min<uint64_t>(totalRows, static_cast<uint64_t>(coreNumAiv));
+    const uint32_t reportedCoreNumAiv = platform.GetCoreNumAiv();
+    // The generic CANN 8.5 Ascend910B platform record reports zero standalone
+    // VectorCore units even though the contest binary is an AIV kernel. Do not
+    // reject otherwise legal inputs because that platform metadata is coarse;
+    // one block is a correctness-safe fallback on the actual 910B target.
+    const uint32_t usableCoreNumAiv = reportedCoreNumAiv == 0 ? 1U : reportedCoreNumAiv;
+    // Scalar auxiliary writes share cache lines across adjacent rows. Keep the
+    // correctness baseline single-core when those optional outputs are enabled.
+    const uint64_t usedCore64 = returnSoftmaxLse
+        ? 1U
+        : std::min<uint64_t>(totalRows, static_cast<uint64_t>(usableCoreNumAiv));
     const uint32_t usedCoreNum = static_cast<uint32_t>(usedCore64);
 
     uint32_t DT_QUERY = static_cast<uint32_t>(queryDtype);
@@ -222,10 +240,14 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     tiling->queryHeadNum = static_cast<uint64_t>(qn);
     tiling->sparseSize = static_cast<uint64_t>(sparseSize);
     tiling->totalRows = totalRows;
+    tiling->primaryIsBf16 = queryDtype == ge::DT_BF16 ? 1U : 0U;
+    tiling->primaryIsFloat = queryDtype == ge::DT_FLOAT ? 1U : 0U;
+    tiling->queryRopeIsBf16 = queryRopeDtype == ge::DT_BF16 ? 1U : 0U;
     tiling->queryRopeIsFloat = queryRopeDtype == ge::DT_FLOAT ? 1U : 0U;
+    tiling->keyRopeIsBf16 = keyRopeDtype == ge::DT_BF16 ? 1U : 0U;
     tiling->keyRopeIsFloat = keyRopeDtype == ge::DT_FLOAT ? 1U : 0U;
-    tiling->hasActualQueryLen = actualQueryLen == nullptr ? 0U : 1U;
-    tiling->hasActualKvLen = actualKvLen == nullptr ? 0U : 1U;
+    tiling->hasActualQueryLen = actualQueryShape == nullptr ? 0U : 1U;
+    tiling->hasActualKvLen = actualKvShape == nullptr ? 0U : 1U;
     tiling->sparseBlockSize = static_cast<uint32_t>(sparseBlockSize);
     tiling->sparseMode = static_cast<uint32_t>(sparseMode);
     tiling->attentionMode = static_cast<uint32_t>(attentionMode);
@@ -284,7 +306,7 @@ static graphStatus InferDataType(gert::InferDataTypeContext *context) {
         return GRAPH_FAILED;
     }
     const ge::DataType queryDtype = context->GetInputDataType(0);
-    if (!IsFloatTensorType(queryDtype)) {
+    if (!IsSupportedTensorType(queryDtype)) {
         return GRAPH_FAILED;
     }
     if (context->SetOutputDataType(0, queryDtype) != GRAPH_SUCCESS) {
@@ -303,48 +325,48 @@ public:
     explicit SparseFlashAttention(const char *name) : OpDef(name) {
         this->Input("query")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("key")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("value")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("sparse_indices")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("actual_seq_lengths_query")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("actual_seq_lengths_kv")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("query_rope")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("key_rope")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("attention_out")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("softmax_max_out")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("softmax_sum_out")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Attr("scale_value").AttrType(OPTIONAL).Float(0.0884);
         this->Attr("sparse_block_size").AttrType(OPTIONAL).Int(1);
         this->Attr("sparse_mode").AttrType(OPTIONAL).Int(3);

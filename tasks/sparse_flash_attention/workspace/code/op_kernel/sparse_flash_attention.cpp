@@ -24,20 +24,31 @@ public:
                                 GM_ADDR softmax_max_out, GM_ADDR softmax_sum_out,
                                 GM_ADDR workspace,
                                 const SparseFlashAttentionTilingData &tiling) {
-        query_ = reinterpret_cast<__gm__ DT_QUERY *>(query);
-        key_ = reinterpret_cast<__gm__ DT_QUERY *>(key);
-        value_ = reinterpret_cast<__gm__ DT_QUERY *>(value);
+        queryHalf_ = reinterpret_cast<__gm__ half *>(query);
+        queryRaw_ = reinterpret_cast<__gm__ uint16_t *>(query);
+        queryFloat_ = reinterpret_cast<__gm__ float *>(query);
+        keyHalf_ = reinterpret_cast<__gm__ half *>(key);
+        keyRaw_ = reinterpret_cast<__gm__ uint16_t *>(key);
+        keyFloat_ = reinterpret_cast<__gm__ float *>(key);
+        valueHalf_ = reinterpret_cast<__gm__ half *>(value);
+        valueRaw_ = reinterpret_cast<__gm__ uint16_t *>(value);
+        valueFloat_ = reinterpret_cast<__gm__ float *>(value);
         sparseIndices_ = reinterpret_cast<__gm__ int32_t *>(sparse_indices);
         actualQueryLen_ = reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_query);
         actualKvLen_ = reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_kv);
         queryRopeHalf_ = reinterpret_cast<__gm__ half *>(query_rope);
+        queryRopeRaw_ = reinterpret_cast<__gm__ uint16_t *>(query_rope);
         queryRopeFloat_ = reinterpret_cast<__gm__ float *>(query_rope);
         keyRopeHalf_ = reinterpret_cast<__gm__ half *>(key_rope);
+        keyRopeRaw_ = reinterpret_cast<__gm__ uint16_t *>(key_rope);
         keyRopeFloat_ = reinterpret_cast<__gm__ float *>(key_rope);
-        attentionOut_ = reinterpret_cast<__gm__ DT_QUERY *>(attention_out);
+        attentionOutHalf_ = reinterpret_cast<__gm__ half *>(attention_out);
+        attentionOutRaw_ = reinterpret_cast<__gm__ uint16_t *>(attention_out);
+        attentionOutFloat_ = reinterpret_cast<__gm__ float *>(attention_out);
         softmaxMaxOut_ = reinterpret_cast<__gm__ float *>(softmax_max_out);
         softmaxSumOut_ = reinterpret_cast<__gm__ float *>(softmax_sum_out);
-        workspaceAcc_ = reinterpret_cast<__gm__ float *>(workspace);
+        pipe_.InitBuffer(accBuf_, CONTENT_DIM * sizeof(float));
+        accumulator_ = accBuf_.Get<float>();
 
         batchSize_ = tiling.batchSize;
         querySeqLen_ = tiling.querySeqLen;
@@ -45,7 +56,11 @@ public:
         queryHeadNum_ = tiling.queryHeadNum;
         sparseSize_ = tiling.sparseSize;
         totalRows_ = tiling.totalRows;
+        primaryIsBf16_ = tiling.primaryIsBf16;
+        primaryIsFloat_ = tiling.primaryIsFloat;
+        queryRopeIsBf16_ = tiling.queryRopeIsBf16;
         queryRopeIsFloat_ = tiling.queryRopeIsFloat;
+        keyRopeIsBf16_ = tiling.keyRopeIsBf16;
         keyRopeIsFloat_ = tiling.keyRopeIsFloat;
         hasActualQueryLen_ = tiling.hasActualQueryLen;
         hasActualKvLen_ = tiling.hasActualKvLen;
@@ -61,26 +76,92 @@ public:
         const uint64_t coreId = static_cast<uint64_t>(AscendC::GetBlockIdx());
         const uint64_t coreCount = usedCoreNum_ == 0 ? 1 : usedCoreNum_;
         for (uint64_t row = coreId; row < totalRows_; row += coreCount) {
-            ProcessRow(row, coreId);
+            ProcessRow(row);
         }
     }
 
 private:
+    template <typename T>
+    __aicore__ inline void FlushCacheLine(__gm__ T *address) const {
+        AscendC::GlobalTensor<T> line;
+        line.SetGlobalBuffer(address, 1);
+        AscendC::DataCacheCleanAndInvalid<T, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                          AscendC::DcciDst::CACHELINE_OUT>(line);
+    }
+
+    __aicore__ inline void FlushOutputs(uint64_t row, bool writeAux) const {
+        const uint64_t outBase = row * CONTENT_DIM;
+        constexpr uint64_t FLUSH_STRIDE_BYTES = 32;
+        const uint64_t flushStrideElements = primaryIsFloat_ != 0
+            ? FLUSH_STRIDE_BYTES / sizeof(float)
+            : FLUSH_STRIDE_BYTES / sizeof(uint16_t);
+        for (uint64_t d = 0; d < CONTENT_DIM; d += flushStrideElements) {
+            if (primaryIsFloat_ != 0) {
+                FlushCacheLine(attentionOutFloat_ + outBase + d);
+            } else {
+                FlushCacheLine(attentionOutRaw_ + outBase + d);
+            }
+        }
+        if (writeAux) {
+            FlushCacheLine(softmaxMaxOut_ + row);
+            FlushCacheLine(softmaxSumOut_ + row);
+        }
+    }
+
+    __aicore__ inline float Bf16BitsToFloat(uint16_t value) const {
+        union {
+            uint32_t bits;
+            float scalar;
+        } converted;
+        converted.bits = static_cast<uint32_t>(value) << 16;
+        return converted.scalar;
+    }
+
+    __aicore__ inline uint16_t FloatToBf16Bits(float value) const {
+        union {
+            float scalar;
+            uint32_t bits;
+        } converted;
+        converted.scalar = value;
+        const uint32_t exponent = converted.bits & 0x7F800000U;
+        const uint32_t mantissa = converted.bits & 0x007FFFFFU;
+        if (exponent == 0x7F800000U && mantissa != 0U) {
+            return static_cast<uint16_t>((converted.bits >> 16) | 0x0040U);
+        }
+        const uint32_t roundingBias = 0x00007FFFU + ((converted.bits >> 16) & 1U);
+        return static_cast<uint16_t>((converted.bits + roundingBias) >> 16);
+    }
+
     __aicore__ inline float ReadQuery(uint64_t offset) const {
-        return static_cast<float>(query_[offset]);
+        if (primaryIsFloat_ != 0) {
+            return queryFloat_[offset];
+        }
+        return primaryIsBf16_ != 0 ? Bf16BitsToFloat(queryRaw_[offset])
+                                   : static_cast<float>(queryHalf_[offset]);
     }
 
     __aicore__ inline float ReadKey(uint64_t offset) const {
-        return static_cast<float>(key_[offset]);
+        if (primaryIsFloat_ != 0) {
+            return keyFloat_[offset];
+        }
+        return primaryIsBf16_ != 0 ? Bf16BitsToFloat(keyRaw_[offset])
+                                   : static_cast<float>(keyHalf_[offset]);
     }
 
     __aicore__ inline float ReadValue(uint64_t offset) const {
-        return static_cast<float>(value_[offset]);
+        if (primaryIsFloat_ != 0) {
+            return valueFloat_[offset];
+        }
+        return primaryIsBf16_ != 0 ? Bf16BitsToFloat(valueRaw_[offset])
+                                   : static_cast<float>(valueHalf_[offset]);
     }
 
     __aicore__ inline float ReadQueryRope(uint64_t offset) const {
         if (queryRopeIsFloat_ != 0) {
             return queryRopeFloat_[offset];
+        }
+        if (queryRopeIsBf16_ != 0) {
+            return Bf16BitsToFloat(queryRopeRaw_[offset]);
         }
         return static_cast<float>(queryRopeHalf_[offset]);
     }
@@ -88,6 +169,9 @@ private:
     __aicore__ inline float ReadKeyRope(uint64_t offset) const {
         if (keyRopeIsFloat_ != 0) {
             return keyRopeFloat_[offset];
+        }
+        if (keyRopeIsBf16_ != 0) {
+            return Bf16BitsToFloat(keyRopeRaw_[offset]);
         }
         return static_cast<float>(keyRopeHalf_[offset]);
     }
@@ -164,18 +248,29 @@ private:
         return dot * scaleValue_;
     }
 
+    __aicore__ inline void StoreAttention(uint64_t offset, float value) {
+        if (primaryIsFloat_ != 0) {
+            attentionOutFloat_[offset] = value;
+        } else if (primaryIsBf16_ != 0) {
+            attentionOutRaw_[offset] = FloatToBf16Bits(value);
+        } else {
+            attentionOutHalf_[offset] = static_cast<half>(value);
+        }
+    }
+
     __aicore__ inline void StoreZeroOutput(uint64_t row, bool writeAux) {
         const uint64_t outBase = row * CONTENT_DIM;
         for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            attentionOut_[outBase + d] = static_cast<DT_QUERY>(0.0F);
+            StoreAttention(outBase + d, 0.0F);
         }
         if (writeAux) {
             softmaxMaxOut_[row] = NEG_INF;
             softmaxSumOut_[row] = 0.0F;
         }
+        FlushOutputs(row, writeAux);
     }
 
-    __aicore__ inline void ProcessRow(uint64_t row, uint64_t coreId) {
+    __aicore__ inline void ProcessRow(uint64_t row) {
         const uint64_t head = row % queryHeadNum_;
         const uint64_t queryRow = row / queryHeadNum_;
         const uint64_t queryPos = queryRow % querySeqLen_;
@@ -189,9 +284,8 @@ private:
             return;
         }
 
-        const uint64_t accBase = coreId * CONTENT_DIM;
         for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            workspaceAcc_[accBase + d] = 0.0F;
+            accumulator_.SetValue(d, 0.0F);
         }
 
         const uint64_t indexBase = (batch * querySeqLen_ + queryPos) * sparseSize_;
@@ -225,8 +319,8 @@ private:
             const float newSum = runningSum * alpha + beta;
             const uint64_t valueBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
             for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-                const float oldAcc = workspaceAcc_[accBase + d];
-                workspaceAcc_[accBase + d] = oldAcc * alpha + beta * ReadValue(valueBase + d);
+                const float oldAcc = accumulator_.GetValue(d);
+                accumulator_.SetValue(d, oldAcc * alpha + beta * ReadValue(valueBase + d));
             }
 
             runningMax = newMax;
@@ -242,29 +336,42 @@ private:
         const float invSum = 1.0F / runningSum;
         const uint64_t outBase = row * CONTENT_DIM;
         for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            attentionOut_[outBase + d] = static_cast<DT_QUERY>(workspaceAcc_[accBase + d] * invSum);
+            StoreAttention(outBase + d, accumulator_.GetValue(d) * invSum);
         }
         if (writeAux) {
             softmaxMaxOut_[row] = runningMax;
             softmaxSumOut_[row] = runningSum;
         }
+        FlushOutputs(row, writeAux);
     }
 
 private:
-    __gm__ DT_QUERY *query_;
-    __gm__ DT_QUERY *key_;
-    __gm__ DT_QUERY *value_;
+    __gm__ half *queryHalf_;
+    __gm__ uint16_t *queryRaw_;
+    __gm__ float *queryFloat_;
+    __gm__ half *keyHalf_;
+    __gm__ uint16_t *keyRaw_;
+    __gm__ float *keyFloat_;
+    __gm__ half *valueHalf_;
+    __gm__ uint16_t *valueRaw_;
+    __gm__ float *valueFloat_;
     __gm__ int32_t *sparseIndices_;
     __gm__ int32_t *actualQueryLen_;
     __gm__ int32_t *actualKvLen_;
     __gm__ half *queryRopeHalf_;
+    __gm__ uint16_t *queryRopeRaw_;
     __gm__ float *queryRopeFloat_;
     __gm__ half *keyRopeHalf_;
+    __gm__ uint16_t *keyRopeRaw_;
     __gm__ float *keyRopeFloat_;
-    __gm__ DT_QUERY *attentionOut_;
+    __gm__ half *attentionOutHalf_;
+    __gm__ uint16_t *attentionOutRaw_;
+    __gm__ float *attentionOutFloat_;
     __gm__ float *softmaxMaxOut_;
     __gm__ float *softmaxSumOut_;
-    __gm__ float *workspaceAcc_;
+    AscendC::TPipe pipe_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> accBuf_;
+    AscendC::LocalTensor<float> accumulator_;
 
     uint64_t batchSize_;
     uint64_t querySeqLen_;
@@ -272,7 +379,11 @@ private:
     uint64_t queryHeadNum_;
     uint64_t sparseSize_;
     uint64_t totalRows_;
+    uint32_t primaryIsBf16_;
+    uint32_t primaryIsFloat_;
+    uint32_t queryRopeIsBf16_;
     uint32_t queryRopeIsFloat_;
+    uint32_t keyRopeIsBf16_;
     uint32_t keyRopeIsFloat_;
     uint32_t hasActualQueryLen_;
     uint32_t hasActualKvLen_;
