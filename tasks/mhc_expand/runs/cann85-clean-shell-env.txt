@@ -1,8 +1,0 @@
-ASCEND_AICPU_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0
-ASCEND_HOME_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0
-ASCEND_OPP_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/opp
-ASCEND_TOOLKIT_HOME=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0
-LD_LIBRARY_PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/lib64:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/lib64/plugin/opskernel:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/lib64/plugin/nnengine:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/tools/aml/lib64:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/tools/aml/lib64/plugin:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver
-PATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/bin:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/tools/ccec_compiler/bin:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/tools/profiler/bin:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/tools/ascend_system_advisor/asys:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/tools/show_kernel_debug_data:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/tools/msobjdump:/usr/bin:/bin:/sbin
-PYTHONPATH=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/python/site-packages:/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/opp/built-in/op_impl/ai_core/tbe:
-TOOLCHAIN_HOME=/home/liufujiang/ascend-envs/cann-8.5.0/cann-8.5.0/toolkit
