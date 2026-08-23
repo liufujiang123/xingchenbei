@@ -1,120 +1,79 @@
 ---
 name: xingchen-kernel-optimizer
-description: Run an evidence-driven Ascend C competition-kernel workflow. Use for establishing a correctness baseline, planning one focused optimization candidate, running build/validate/bench/profile gates, and deciding keep/reject without changing the competition interface.
+description: Lightweight orchestration for Ascend competition operators: reuse context, protect the contract, use evidence gates, and load design/performance experience only when relevant.
 ---
 
 # Xingchen Kernel Optimizer
 
-Use this skill for competition-kernel implementation and optimization inside this repository.
+This skill is intentionally small. Let Codex handle ordinary engineering; use the Harness for expensive mistakes and repetitive mechanics.
 
-## Before changing code
+## Start or resume
 
-1. Read the nearest `AGENTS.md`.
-2. Read `tasks/<task>/TASK.md` and the authoritative competition statement/template.
-3. Run `git status --short`.
-4. Inspect the existing operator with `rg` / `rg --files`.
-5. Identify the immutable platform-visible interface.
-6. If the platform contract is ambiguous and CANNJudge access is available, use `cannjudge-submit` to obtain current problem/package evidence before guessing.
-7. If no correctness baseline exists, prioritize that before performance work.
-
-## Platform routing
-
-Use `cannjudge-submit` for CANNJudge-specific work:
-
-- verify current problem metadata/problem ID;
-- download an official package into a temporary location and compare it with the checked-in template;
-- submit code only when the user explicitly authorizes submission;
-- query submission status/results and rankings.
-
-Do not use platform tooling to infer or access hidden testcases. Never ask for a plaintext CANNJudge password or echo credential material. Follow the official RSA-encrypted workflow.
-
-The supporting `ascendc-ops-project` skill is installed because `cannjudge-submit` declares it as a dependency. For core technical implementation decisions in this repository, prefer the dedicated Ascend skills below.
-
-## Ascend domain routing
-
-Use official Ascend skills as appropriate:
-
-- architecture/dataflow/tiling design → `ascendc-operator-design`
-- Host/Kernel code generation and implementation → `ascendc-operator-code-gen`
-- compiler errors → `ascendc-operator-compile-debug`
-- numerical failures → `ascendc-operator-precision-debug`
-- measured performance analysis → `ascendc-operator-performance-eval`
-- optimization hypotheses/implementation → `ascendc-operator-performance-optim`
-
-Official skills are advisors; repository and competition contracts remain higher priority.
-
-## Baseline phase
-
-The baseline goal is the simplest implementation that:
-
-- preserves the external interface;
-- covers the required dtype/shape/mode domain;
-- builds on the target CANN/SOC environment;
-- passes the configured correctness evaluator.
-
-Run:
+At the start of a new Codex conversation for a task:
 
 ```bash
-python3 tools/agent_loop.py baseline --name baseline
+python3 tools/context_state.py bootstrap --task <task> --new-session
+python3 tools/task_state.py --task <task>
 ```
 
-Do not start speculative performance work until build and correctness pass.
+Do this once. Stable files already presented in the current session must not be reread unless their hash changed or exact context was lost.
 
-## Candidate phase
-
-For each optimization candidate:
-
-1. Write one concrete hypothesis, e.g. “aggregate adjacent sparse indices to reduce GM transfer setup overhead”.
-2. Change one major optimization dimension at a time.
-3. Keep the public interface unchanged.
-4. Execute:
+To use another Skill without ritual rereads:
 
 ```bash
-python3 tools/agent_loop.py candidate \
-  --name <candidate-name> \
-  --hypothesis "<single focused hypothesis>"
+python3 tools/context_state.py use --task <task> .agents/skills/<skill>/SKILL.md
 ```
 
-The loop enforces guard → build → validate → benchmark. A failed guard/build/validation candidate is rejected before benchmark.
+Unchanged -> reuse context. Changed -> consume the diff first.
 
-## Profile phase
+## Contract and correctness
 
-Use profiling only to answer a concrete question:
+Authority order is competition/platform evidence -> repository/task contract -> official template -> skills/references -> assumptions.
+
+Keep the public operator interface unchanged unless authoritative evidence permits a change. Keep implementation information internal to tiling/workspace/templates.
+
+For a new or uncertain task, resolve only the facts that can change correctness: ABI, mathematical semantics, supported dtype/shape/modes, target CANN/SOC, and required packaging. Do not force a generic multi-stage design ritual.
+
+Build the simplest contract-complete baseline, then use configured build/validation gates. Never weaken the evaluator to pass.
+
+## Experience lookup
+
+When `tools/ascend_design_analyze.py` exists and design experience is useful:
 
 ```bash
-python3 tools/agent_loop.py profile \
-  --name <candidate-name>-profile \
-  --hypothesis "<question the profile should answer>"
+python3 tools/ascend_design_analyze.py --task <task>
 ```
 
-Interpret profiler results with the official Ascend performance skills. Do not translate NVIDIA-specific metrics mechanically to Ascend.
+Read the complete summary catalog once. Codex chooses relevant pattern ids; machine suggestions are weak navigation only. Load at most a few detailed patterns for the current question:
 
-## Promotion rule
+```bash
+python3 tools/ascend_design_analyze.py \
+  --task <task> \
+  --select-pattern <id>
+```
 
-A candidate may be promoted only when:
+Do not read long playbooks end-to-end unless a specific unresolved question requires them.
 
-- build passed;
-- required correctness passed;
-- benchmark score was parsed from the official/configured evaluator;
-- it beats the current retained implementation under `BENCH_DIRECTION`;
-- it does not narrow the required functional domain.
+## Performance
 
-Record the measured result and decision in `tasks/<task>/optimization-log.md`.
+Only optimize after correctness evidence exists.
 
-If CANNJudge is used as an additional evaluator, record the submission ID and returned status/score evidence without recording credentials. Do not equate a public leaderboard improvement with correctness if required cases did not pass.
+When the branch provides the generic diagnosis mode, use it only when it can answer a concrete question:
 
-## Search dimensions for attention-like sparse kernels
+```bash
+python3 tools/agent_loop.py diagnose --task <task> --name pre-candidate
+```
 
-Consider, based on evidence:
+Evidence confidence is `profile-observed > configured hypothesis > static source risk`. Static source risks are not measured bottlenecks.
 
-- sparse gather coalescing / contiguous-run aggregation;
-- Q sequence × head × sparse-index multicore partition;
-- sparse tile size and tail handling;
-- GM/L1/UB residency and buffering;
-- Cube/Vector overlap and synchronization;
-- Matmul/MMAD shape utilization;
-- stable softmax / online softmax;
-- FP16/BF16 input with FP32-sensitive accumulation where appropriate;
-- avoiding materialization of large score intermediates.
+For each candidate: state one hypothesis, change one major mechanism, build, validate, benchmark on the same cases, and keep/reject from evidence. Profile only when it will choose the next action.
 
-Do not apply a technique merely because it helps CUDA/Triton kernels; confirm it maps to the target Ascend architecture/API.
+## Platform submission
+
+Use current CANNJudge identity/package evidence before submission when available. Never submit implicitly; explicit user authorization is required.
+
+Local A3/proxy validation and platform 910B evidence must remain clearly distinguished.
+
+## Reporting
+
+Do not spend tokens proving that you followed this skill. Report only new contract facts, conflicts, meaningful design decisions, failed/passed gates, measured performance, and blockers.
