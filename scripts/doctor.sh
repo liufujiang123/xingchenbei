@@ -34,3 +34,15 @@ if [[ -f "$ROOT/.agents/skills/cannjudge-submit/SKILL.md" ]]; then
 else
   echo "missing: CANNJudge skill; run scripts/bootstrap_skills.sh"
 fi
+
+python3 -m py_compile \
+  "$ROOT/tools/agent_loop.py" \
+  "$ROOT/tools/context_state.py" \
+  "$ROOT/tools/task_state.py" \
+  "$ROOT/tools/evidence_fingerprint.py"
+echo "ok: harness python syntax"
+
+python3 "$ROOT/tests/harness/test_context_state.py"
+python3 "$ROOT/tests/harness/test_evidence_fingerprint.py"
+python3 "$ROOT/tests/harness/test_task_state.py"
+echo "ok: harness self-tests"
