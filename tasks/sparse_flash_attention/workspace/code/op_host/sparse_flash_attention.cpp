@@ -75,7 +75,6 @@ bool ReadAttrs(const gert::RuntimeAttrs *attrs, float &scaleValue,
         returnSoftmaxLse = *returnLse;
     }
 
-    // ascend910b corresponds to the Atlas A2 family constraints stated by the task.
     if (!IsPowerOfTwo(sparseBlockSize) || sparseBlockSize > 128) {
         return false;
     }
@@ -223,11 +222,8 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     tiling->queryHeadNum = static_cast<uint64_t>(qn);
     tiling->sparseSize = static_cast<uint64_t>(sparseSize);
     tiling->totalRows = totalRows;
-    tiling->queryDtype = static_cast<uint32_t>(queryDtype);
-    tiling->keyDtype = static_cast<uint32_t>(keyDtype);
-    tiling->valueDtype = static_cast<uint32_t>(valueDtype);
-    tiling->queryRopeDtype = static_cast<uint32_t>(queryRopeDtype);
-    tiling->keyRopeDtype = static_cast<uint32_t>(keyRopeDtype);
+    tiling->queryRopeIsFloat = queryRopeDtype == ge::DT_FLOAT ? 1U : 0U;
+    tiling->keyRopeIsFloat = keyRopeDtype == ge::DT_FLOAT ? 1U : 0U;
     tiling->hasActualQueryLen = actualQueryLen == nullptr ? 0U : 1U;
     tiling->hasActualKvLen = actualKvLen == nullptr ? 0U : 1U;
     tiling->sparseBlockSize = static_cast<uint32_t>(sparseBlockSize);
