@@ -73,13 +73,13 @@ Host Tiling currently:
 6. records presence of optional actual-length tensors;
 7. records independent RoPE dtype flags;
 8. launches `min(B*Q_S*Q_N, available_AIV_cores)` cores;
-9. requests zero workspace.
+9. requests `usedCoreNum * 512 * sizeof(float)` workspace bytes.
 
 The TilingData contains only internal runtime facts and does not alter the public interface.
 
 ## 5. Baseline row algorithm
 
-The implementation uses online stable softmax so it does not need to materialize the sparse score vector or allocate workspace.
+The implementation uses online stable softmax so it does not need to materialize the sparse score vector.
 
 State for one row:
 
@@ -116,10 +116,16 @@ The first implementation deliberately favors transparency over performance:
 - direct scalar GM reads for query/key/value/RoPE/index tensors;
 - float32 dot-product accumulation;
 - float32 online-softmax state;
-- 512-wide accumulator stored in the owned `attention_out` row between sparse-key updates;
-- direct scalar GM writes;
+- one reusable 512-float workspace accumulator per active AIV core;
+- the accumulator remains float32 for the entire sparse loop and is cast to output dtype only once after normalization;
 - scalar exponential approximation using ln(2) range reduction and an eighth-order Taylor polynomial;
-- no UB queueing, no L1/L0 staging, no Cube matmul, no workspace.
+- no UB queueing, no L1/L0 staging, no Cube matmul.
+
+The workspace is bounded by core count rather than sequence length:
+
+```text
+workspace_bytes = usedCoreNum * 512 * sizeof(float)
+```
 
 This is expected to be slow. It exists to establish compiler/API and semantic correctness before optimization.
 
@@ -169,9 +175,10 @@ Current policy:
 - content and RoPE dot products accumulate in float32;
 - the supplied `scale_value` is converted through float16 once in the kernel before use, matching the task statement's explicit scale-precision requirement;
 - online-softmax max/sum are float32;
-- the value numerator is mathematically float32, but in this scalar baseline it is stored back through `attention_out` between sparse steps, so float16 queries incur intermediate float16 rounding.
+- the full 512-wide weighted-value numerator remains float32 in the per-core workspace;
+- `attention_out` is cast to query dtype only after final normalization.
 
-That last point is a known baseline precision risk. If compilation succeeds but evaluator precision is close rather than exact, the first precision improvement should move the 512-wide accumulator into UB as float32 without changing the algorithm.
+The main remaining numerical approximation is scalar `exp`. If evaluator precision is close but not sufficient, the first precision change should replace this approximation with the Ascend Vector `Exp` path without changing the row algorithm.
 
 ## 11. Known correctness risks
 
@@ -182,7 +189,6 @@ That last point is a known baseline precision risk. If compilation succeeds but 
 | padded query row | zero output | verify evaluator convention |
 | block-wise selection | consume provided row directly | verify block-size cases |
 | scalar exp approximation | high-order range-reduced polynomial | replace with Ascend Vector Exp if precision fails |
-| FP16 accumulator spill | output row used as running accumulator | move accumulator to FP32 UB |
 | float32 template path | implemented for content tensors | confirm platform actually tests it |
 | BF16 statement/template mismatch | do not alter public template | follow contest template/evaluator |
 
@@ -203,7 +209,7 @@ No build, runtime, or correctness result is claimed in this document yet.
 
 Once the scalar baseline passes, likely high-impact dimensions are:
 
-- keep Q/Q-RoPE and FP32 output accumulator in UB;
+- move Q/Q-RoPE and the FP32 output accumulator into UB;
 - aggregate contiguous sparse-index runs before GM copy;
 - gather K/K-RoPE/V in sparse tiles;
 - compute multiple sparse scores with Cube/Matmul/MMAD instead of scalar dots;
