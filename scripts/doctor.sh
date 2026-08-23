@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 echo "repo=$ROOT"
+
 for bin in git python3 bash rg; do
   if command -v "$bin" >/dev/null 2>&1; then
     echo "ok: $bin=$(command -v "$bin")"
@@ -16,10 +17,10 @@ else
   echo "missing: npu-smi (expected off Ascend host)"
 fi
 
-if [[ -f "$ROOT/config/agent.env" ]]; then
-  echo "ok: config/agent.env"
+if [[ -f "$ROOT/config/agent.env" ]] || compgen -G "$ROOT/config/tasks/*.env" >/dev/null; then
+  echo "ok: harness task config available"
 else
-  echo "missing: config/agent.env"
+  echo "note: no task config yet; create config/tasks/<task>.env from config/agent.env.example"
 fi
 
 if [[ -f "$ROOT/.agents/skills/xingchen-kernel-optimizer/SKILL.md" ]]; then
@@ -28,7 +29,7 @@ else
   echo "missing: local optimizer skill"
 fi
 
-if [[ -d "$ROOT/.agents/skills/ascendc-operator-design" ]]; then
+if [[ -f "$ROOT/.agents/skills/ascendc-operator-design/SKILL.md" ]]; then
   echo "ok: Ascend skills bootstrapped"
 else
   echo "missing: Ascend skills; run scripts/bootstrap_skills.sh"
@@ -45,6 +46,8 @@ python3 -m py_compile \
   "$ROOT/tools/context_state.py" \
   "$ROOT/tools/task_state.py" \
   "$ROOT/tools/evidence_fingerprint.py" \
+  "$ROOT/tools/cannjudge_package.py" \
+  "$ROOT/tools/cannjudge_eval.py" \
   "$ROOT/tools/ascend_design_analyze.py" \
   "$ROOT/tools/ascend_perf_analyze.py" \
   "$ROOT/tools/ascend_perf_plan.py"
@@ -53,6 +56,7 @@ echo "ok: harness python syntax"
 python3 "$ROOT/tests/harness/test_context_state.py"
 python3 "$ROOT/tests/harness/test_evidence_fingerprint.py"
 python3 "$ROOT/tests/harness/test_task_state.py"
+python3 "$ROOT/tests/harness/test_cannjudge_package.py"
 python3 "$ROOT/tests/harness/test_ascend_design_analyze.py"
 python3 "$ROOT/tests/harness/test_ascend_perf_analyze.py"
 echo "ok: harness self-tests"

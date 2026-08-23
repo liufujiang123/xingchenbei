@@ -6,6 +6,7 @@ config/tasks/*.local.env
 # Runtime-generated skill/reference symlinks
 .agents/skills/ascendc-*
 .agents/skills/cannjudge-submit
+.agents/skills/ascendc-ops-project
 docs/kda-prompts
 
 # CANNJudge credential/key material must stay local
@@ -15,13 +16,20 @@ docs/kda-prompts
 **/*cannjudge*secret*
 **/*cannjudge*ciphertext*
 
-# Experiment/profiler outputs
+# Runtime evidence and profiler output: keep compact conclusions in task docs.
 runs/*
 !runs/.gitkeep
 profiles/*
 !profiles/.gitkeep
-tasks/*/runs/harness/
-tasks/*/runs/cannjudge/
+tasks/*/runs/*
+tasks/*/profiles/*
+cceprint/
+**/cceprint/
+msprof_output/
+**/msprof_output/
+PROF_*
+OPPROF_*
+extra-info/
 
 # Competition build artifacts
 build/
@@ -32,13 +40,12 @@ dist/
 *.o
 *.so
 *.log
-PROF_*
-OPPROF_*
-extra-info/
 
 # Python/editor noise
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
 .venv/
 .vscode/
 .idea/
