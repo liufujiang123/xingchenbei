@@ -240,7 +240,11 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     if (workspace == nullptr) {
         return ge::GRAPH_FAILED;
     }
-    workspace[0] = 0;
+    const uint64_t workspaceBytes = usedCore64 * static_cast<uint64_t>(CONTENT_DIM) * sizeof(float);
+    if (workspaceBytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+        return ge::GRAPH_FAILED;
+    }
+    workspace[0] = static_cast<size_t>(workspaceBytes);
     return ge::GRAPH_SUCCESS;
 }
 }  // namespace optiling
