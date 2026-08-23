@@ -59,6 +59,12 @@ Design experience is a catalog: inspect summaries once, choose relevant entries 
 
 After correctness is established, performance work should change one major mechanism at a time and keep/reject it from same-case evidence.
 
+## Branch discipline
+
+`main` is the canonical generic Harness baseline. Generic tools, guards, Skills, registries, and Harness documentation should land on `main` (or a dedicated infrastructure branch merged into `main`) and then reach active task branches through a merge from `main`.
+
+Do not copy the same generic Harness fix independently into multiple task branches. Task branches should differ from `main` only for task-specific contract/code/config/tests/scripts/docs, plus explicit merges that inherit the canonical Harness. If task work reveals a reusable Ascend lesson, distill the reusable knowledge into the generic Harness deliberately rather than leaving infrastructure drift inside that task branch.
+
 ## Finish
 
 Before finishing, verify intended diff scope, interface compatibility, executed validation evidence, and absence of generated artifacts or secrets.
