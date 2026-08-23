@@ -4,9 +4,5 @@
 #include <cstdint>
 
 struct MhcSinkhornTilingData {
-    uint64_t matrixCount;
-    uint64_t matrixSize;
-    uint32_t usedCoreNum;
-    uint32_t iterations;
-    float eps;
+    uint32_t length;
 };
