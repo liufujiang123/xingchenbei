@@ -324,7 +324,6 @@ def build_cases() -> list[Case]:
             return_aux=False,
         ),
         make_case("H_fp32", [[0, 1, 3], [2, 3, 1]], kvs=4, dtype=fp32),
-        make_case("I_bf16", [[0, 1, 3], [2, 3, 1]], kvs=4, dtype=fp32, bf16=True),
     ]
 
 
@@ -395,7 +394,7 @@ def build_workspace_cases() -> list[Case]:
     def add(name: str, **overrides: object) -> None:
         cases.append(make_workspace_case(name, **overrides))
 
-    for dtype_name in ("float16", "bfloat16", "float32"):
+    for dtype_name in ("float16", "float32"):
         add(f"dtype_{dtype_name}", dtype_name=dtype_name)
     for b in (1, 2):
         add(f"batch_{b}", b=b)
@@ -421,8 +420,8 @@ def build_workspace_cases() -> list[Case]:
     for return_aux in (False, True):
         add(f"return_lse_{str(return_aux).lower()}", return_aux=return_aux)
     # OpDef dtype/format lists are index-paired. The generated simplified keys
-    # therefore admit exactly these three same-dtype primary/RoPE combinations.
-    for dtype_name in ("float16", "bfloat16", "float32"):
+    # therefore admit exactly these two official same-dtype combinations.
+    for dtype_name in ("float16", "float32"):
         add(f"rope_{dtype_name}_{dtype_name}", dtype_name=dtype_name,
             rope_dtype_name=dtype_name)
     return cases

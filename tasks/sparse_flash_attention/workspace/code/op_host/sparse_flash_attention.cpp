@@ -1,7 +1,6 @@
 // Host侧Tiling实现
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 
 #include "register/op_def_registry.h"
 #include "tiling/platform/platform_ascendc.h"
@@ -10,79 +9,10 @@
 #include "../op_kernel/tiling_key_sparse_flash_attention.h"
 
 namespace {
-constexpr int64_t CONTENT_DIM = 512;
-constexpr int64_t ROPE_DIM = 64;
-constexpr int64_t KV_HEAD_NUM = 1;
 constexpr float DEFAULT_SCALE = 0.0884F;
 constexpr int64_t DEFAULT_SPARSE_BLOCK_SIZE = 1;
 constexpr int64_t DEFAULT_SPARSE_MODE = 3;
 constexpr int64_t DEFAULT_ATTENTION_MODE = 2;
-
-bool IsSupportedTensorType(ge::DataType dtype) {
-    return dtype == ge::DT_FLOAT16 || dtype == ge::DT_BF16 || dtype == ge::DT_FLOAT;
-}
-
-bool IsPowerOfTwo(int64_t value) {
-    return value > 0 && (value & (value - 1)) == 0;
-}
-
-bool ReadRank4Shape(const gert::StorageShape *storageShape, int64_t &d0, int64_t &d1,
-                    int64_t &d2, int64_t &d3) {
-    if (storageShape == nullptr) {
-        return false;
-    }
-    const gert::Shape &shape = storageShape->GetStorageShape();
-    if (shape.GetDimNum() != 4) {
-        return false;
-    }
-    d0 = shape.GetDim(0);
-    d1 = shape.GetDim(1);
-    d2 = shape.GetDim(2);
-    d3 = shape.GetDim(3);
-    return d0 > 0 && d1 > 0 && d2 > 0 && d3 > 0;
-}
-
-bool ReadAttrs(const gert::RuntimeAttrs *attrs, float &scaleValue,
-               int64_t &sparseBlockSize, int64_t &sparseMode,
-               int64_t &attentionMode, bool &returnSoftmaxLse) {
-    scaleValue = DEFAULT_SCALE;
-    sparseBlockSize = DEFAULT_SPARSE_BLOCK_SIZE;
-    sparseMode = DEFAULT_SPARSE_MODE;
-    attentionMode = DEFAULT_ATTENTION_MODE;
-    returnSoftmaxLse = false;
-
-    if (attrs == nullptr) {
-        return true;
-    }
-    const float *scale = attrs->GetFloat(0);
-    const int64_t *blockSize = attrs->GetInt(1);
-    const int64_t *mode = attrs->GetInt(2);
-    const int64_t *attnMode = attrs->GetInt(3);
-    const bool *returnLse = attrs->GetBool(4);
-    if (scale != nullptr) {
-        scaleValue = *scale;
-    }
-    if (blockSize != nullptr) {
-        sparseBlockSize = *blockSize;
-    }
-    if (mode != nullptr) {
-        sparseMode = *mode;
-    }
-    if (attnMode != nullptr) {
-        attentionMode = *attnMode;
-    }
-    if (returnLse != nullptr) {
-        returnSoftmaxLse = *returnLse;
-    }
-
-    if (!IsPowerOfTwo(sparseBlockSize) || sparseBlockSize > 128) {
-        return false;
-    }
-    if (sparseMode != 0 && sparseMode != 3) {
-        return false;
-    }
-    return attentionMode == 2;
-}
 }  // namespace
 
 namespace optiling {
@@ -91,127 +21,54 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
         return ge::GRAPH_FAILED;
     }
 
-    const gert::StorageShape *queryShape = context->GetRequiredInputShape(0);
-    const gert::StorageShape *keyShape = context->GetRequiredInputShape(1);
-    const gert::StorageShape *valueShape = context->GetRequiredInputShape(2);
-    const gert::StorageShape *sparseShape = context->GetRequiredInputShape(3);
-    const gert::StorageShape *actualQueryShape = context->GetOptionalInputShape(4);
-    const gert::StorageShape *actualKvShape = context->GetOptionalInputShape(5);
-    const gert::StorageShape *queryRopeShape = context->GetRequiredInputShape(6);
-    const gert::StorageShape *keyRopeShape = context->GetRequiredInputShape(7);
-    const gert::CompileTimeTensorDesc *queryDesc = context->GetRequiredInputDesc(0);
-    const gert::CompileTimeTensorDesc *keyDesc = context->GetRequiredInputDesc(1);
-    const gert::CompileTimeTensorDesc *valueDesc = context->GetRequiredInputDesc(2);
-    const gert::CompileTimeTensorDesc *sparseDesc = context->GetRequiredInputDesc(3);
-    const gert::CompileTimeTensorDesc *actualQueryDesc = context->GetOptionalInputDesc(4);
-    const gert::CompileTimeTensorDesc *actualKvDesc = context->GetOptionalInputDesc(5);
-    const gert::CompileTimeTensorDesc *queryRopeDesc = context->GetRequiredInputDesc(6);
-    const gert::CompileTimeTensorDesc *keyRopeDesc = context->GetRequiredInputDesc(7);
-    if (queryShape == nullptr || keyShape == nullptr || valueShape == nullptr ||
-        sparseShape == nullptr || queryRopeShape == nullptr || keyRopeShape == nullptr ||
-        queryDesc == nullptr || keyDesc == nullptr || valueDesc == nullptr ||
-        sparseDesc == nullptr || queryRopeDesc == nullptr || keyRopeDesc == nullptr ||
-        (actualQueryShape == nullptr) != (actualQueryDesc == nullptr) ||
-        (actualKvShape == nullptr) != (actualKvDesc == nullptr)) {
+    const gert::Tensor *query = context->GetRequiredInputTensor(0);
+    const gert::Tensor *key = context->GetRequiredInputTensor(1);
+    const gert::Tensor *value = context->GetRequiredInputTensor(2);
+    const gert::Tensor *sparseIndices = context->GetRequiredInputTensor(3);
+    const gert::Tensor *actualQueryLen = context->GetOptionalInputTensor(4);
+    const gert::Tensor *actualKvLen = context->GetOptionalInputTensor(5);
+    const gert::Tensor *queryRope = context->GetRequiredInputTensor(6);
+    const gert::Tensor *keyRope = context->GetRequiredInputTensor(7);
+    if (query == nullptr || key == nullptr || value == nullptr || sparseIndices == nullptr ||
+        queryRope == nullptr || keyRope == nullptr) {
         return ge::GRAPH_FAILED;
     }
 
-    int64_t b = 0;
-    int64_t qs = 0;
-    int64_t qn = 0;
-    int64_t qd = 0;
-    int64_t kb = 0;
-    int64_t kvs = 0;
-    int64_t kvn = 0;
-    int64_t kd = 0;
-    int64_t vb = 0;
-    int64_t vks = 0;
-    int64_t vkn = 0;
-    int64_t vd = 0;
-    int64_t ib = 0;
-    int64_t iqs = 0;
-    int64_t ikvn = 0;
-    int64_t sparseSize = 0;
-    int64_t qrb = 0;
-    int64_t qrqs = 0;
-    int64_t qrqn = 0;
-    int64_t qrd = 0;
-    int64_t krb = 0;
-    int64_t krks = 0;
-    int64_t krn = 0;
-    int64_t krd = 0;
+    // The generated ACLNN path has already matched this call against the
+    // official OpDef. Host Tiling only extracts runtime facts needed by the
+    // kernel; it must not reject an otherwise platform-legal call.
+    const gert::Shape &queryShape = query->GetStorageShape();
+    const gert::Shape &keyShape = key->GetStorageShape();
+    const gert::Shape &sparseShape = sparseIndices->GetStorageShape();
+    const uint64_t b = static_cast<uint64_t>(queryShape.GetDim(0));
+    const uint64_t qs = static_cast<uint64_t>(queryShape.GetDim(1));
+    const uint64_t qn = static_cast<uint64_t>(queryShape.GetDim(2));
+    const uint64_t kvs = static_cast<uint64_t>(keyShape.GetDim(1));
+    const uint64_t sparseSize = static_cast<uint64_t>(sparseShape.GetDim(3));
 
-    if (!ReadRank4Shape(queryShape, b, qs, qn, qd) ||
-        !ReadRank4Shape(keyShape, kb, kvs, kvn, kd) ||
-        !ReadRank4Shape(valueShape, vb, vks, vkn, vd) ||
-        !ReadRank4Shape(sparseShape, ib, iqs, ikvn, sparseSize) ||
-        !ReadRank4Shape(queryRopeShape, qrb, qrqs, qrqn, qrd) ||
-        !ReadRank4Shape(keyRopeShape, krb, krks, krn, krd)) {
-        return ge::GRAPH_FAILED;
-    }
-
-    if (b != kb || b != vb || b != ib || b != qrb || b != krb ||
-        qs != iqs || qs != qrqs || qn != qrqn ||
-        kvs != vks || kvs != krks ||
-        qd != CONTENT_DIM || kd != CONTENT_DIM || vd != CONTENT_DIM ||
-        qrd != ROPE_DIM || krd != ROPE_DIM ||
-        kvn != KV_HEAD_NUM || vkn != KV_HEAD_NUM || ikvn != KV_HEAD_NUM || krn != KV_HEAD_NUM ||
-        sparseSize <= 0) {
-        return ge::GRAPH_FAILED;
-    }
-
-    const ge::DataType queryDtype = queryDesc->GetDataType();
-    const ge::DataType keyDtype = keyDesc->GetDataType();
-    const ge::DataType valueDtype = valueDesc->GetDataType();
-    const ge::DataType sparseDtype = sparseDesc->GetDataType();
-    const ge::DataType queryRopeDtype = queryRopeDesc->GetDataType();
-    const ge::DataType keyRopeDtype = keyRopeDesc->GetDataType();
-    if (!IsSupportedTensorType(queryDtype) || !IsSupportedTensorType(keyDtype) ||
-        !IsSupportedTensorType(valueDtype) || !IsSupportedTensorType(queryRopeDtype) ||
-        !IsSupportedTensorType(keyRopeDtype) || sparseDtype != ge::DT_INT32 ||
-        queryDtype != keyDtype || queryDtype != valueDtype) {
-        return ge::GRAPH_FAILED;
-    }
-
-    if (actualQueryShape != nullptr) {
-        const gert::Shape &shape = actualQueryShape->GetStorageShape();
-        if (shape.GetDimNum() != 1 || shape.GetDim(0) != b ||
-            actualQueryDesc->GetDataType() != ge::DT_INT32) {
-            return ge::GRAPH_FAILED;
-        }
-    }
-    if (actualKvShape != nullptr) {
-        const gert::Shape &shape = actualKvShape->GetStorageShape();
-        if (shape.GetDimNum() != 1 || shape.GetDim(0) != b ||
-            actualKvDesc->GetDataType() != ge::DT_INT32) {
-            return ge::GRAPH_FAILED;
-        }
-    }
+    const ge::DataType queryDtype = query->GetDataType();
+    const ge::DataType queryRopeDtype = queryRope->GetDataType();
+    const ge::DataType keyRopeDtype = keyRope->GetDataType();
 
     float scaleValue = DEFAULT_SCALE;
     int64_t sparseBlockSize = DEFAULT_SPARSE_BLOCK_SIZE;
     int64_t sparseMode = DEFAULT_SPARSE_MODE;
     int64_t attentionMode = DEFAULT_ATTENTION_MODE;
     bool returnSoftmaxLse = false;
-    if (!ReadAttrs(context->GetAttrs(), scaleValue, sparseBlockSize, sparseMode,
-                   attentionMode, returnSoftmaxLse)) {
-        return ge::GRAPH_FAILED;
+    const gert::RuntimeAttrs *attrs = context->GetAttrs();
+    if (attrs != nullptr) {
+        const float *scale = attrs->GetFloat(0);
+        const int64_t *blockSize = attrs->GetInt(1);
+        const int64_t *mode = attrs->GetInt(2);
+        const int64_t *attnMode = attrs->GetInt(3);
+        const bool *returnLse = attrs->GetBool(4);
+        scaleValue = scale == nullptr ? DEFAULT_SCALE : *scale;
+        sparseBlockSize = blockSize == nullptr ? DEFAULT_SPARSE_BLOCK_SIZE : *blockSize;
+        sparseMode = mode == nullptr ? DEFAULT_SPARSE_MODE : *mode;
+        attentionMode = attnMode == nullptr ? DEFAULT_ATTENTION_MODE : *attnMode;
+        returnSoftmaxLse = returnLse == nullptr ? false : *returnLse;
     }
-
-    const uint64_t ub = static_cast<uint64_t>(b);
-    const uint64_t uqs = static_cast<uint64_t>(qs);
-    const uint64_t uqn = static_cast<uint64_t>(qn);
-    if (ub > std::numeric_limits<uint64_t>::max() / uqs) {
-        return ge::GRAPH_FAILED;
-    }
-    const uint64_t bq = ub * uqs;
-    if (bq > std::numeric_limits<uint64_t>::max() / uqn) {
-        return ge::GRAPH_FAILED;
-    }
-    const uint64_t totalRows = bq * uqn;
-    if (totalRows == 0) {
-        return ge::GRAPH_FAILED;
-    }
+    const uint64_t totalRows = b * qs * qn;
 
     auto platform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     const uint32_t reportedCoreNumAiv = platform.GetCoreNumAiv();
@@ -246,8 +103,8 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     tiling->queryRopeIsFloat = queryRopeDtype == ge::DT_FLOAT ? 1U : 0U;
     tiling->keyRopeIsBf16 = keyRopeDtype == ge::DT_BF16 ? 1U : 0U;
     tiling->keyRopeIsFloat = keyRopeDtype == ge::DT_FLOAT ? 1U : 0U;
-    tiling->hasActualQueryLen = actualQueryShape == nullptr ? 0U : 1U;
-    tiling->hasActualKvLen = actualKvShape == nullptr ? 0U : 1U;
+    tiling->hasActualQueryLen = actualQueryLen == nullptr ? 0U : 1U;
+    tiling->hasActualKvLen = actualKvLen == nullptr ? 0U : 1U;
     tiling->sparseBlockSize = static_cast<uint32_t>(sparseBlockSize);
     tiling->sparseMode = static_cast<uint32_t>(sparseMode);
     tiling->attentionMode = static_cast<uint32_t>(attentionMode);
@@ -255,67 +112,21 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
     tiling->usedCoreNum = usedCoreNum;
     tiling->scaleValue = scaleValue;
 
-    if (context->SetBlockDim(usedCoreNum) != ge::GRAPH_SUCCESS) {
-        return ge::GRAPH_FAILED;
-    }
+    context->SetBlockDim(usedCoreNum);
     size_t *workspace = context->GetWorkspaceSizes(1);
-    if (workspace == nullptr) {
-        return ge::GRAPH_FAILED;
-    }
-    const uint64_t workspaceBytes = usedCore64 * static_cast<uint64_t>(CONTENT_DIM) * sizeof(float);
-    if (workspaceBytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-        return ge::GRAPH_FAILED;
-    }
-    workspace[0] = static_cast<size_t>(workspaceBytes);
+    // The kernel keeps its accumulator in per-core UB; workspace is unused.
+    workspace[0] = 0;
     return ge::GRAPH_SUCCESS;
 }
 }  // namespace optiling
 
 namespace ge {
 static graphStatus InferShape(gert::InferShapeContext *context) {
-    if (context == nullptr) {
-        return GRAPH_FAILED;
-    }
-    const gert::Shape *queryShape = context->GetInputShape(0);
-    gert::Shape *attentionShape = context->GetOutputShape(0);
-    if (queryShape == nullptr || attentionShape == nullptr || queryShape->GetDimNum() != 4) {
-        return GRAPH_FAILED;
-    }
-    *attentionShape = *queryShape;
-
-    const int64_t b = queryShape->GetDim(0);
-    const int64_t qs = queryShape->GetDim(1);
-    const int64_t qn = queryShape->GetDim(2);
-    if (b <= 0 || qs <= 0 || qn <= 0) {
-        return GRAPH_FAILED;
-    }
-    const gert::Shape auxShape({b, 1, qs, qn});
-    gert::Shape *maxShape = context->GetOutputShape(1);
-    gert::Shape *sumShape = context->GetOutputShape(2);
-    if (maxShape != nullptr) {
-        *maxShape = auxShape;
-    }
-    if (sumShape != nullptr) {
-        *sumShape = auxShape;
-    }
     return GRAPH_SUCCESS;
 }
 
 static graphStatus InferDataType(gert::InferDataTypeContext *context) {
-    if (context == nullptr) {
-        return GRAPH_FAILED;
-    }
-    const ge::DataType queryDtype = context->GetInputDataType(0);
-    if (!IsSupportedTensorType(queryDtype)) {
-        return GRAPH_FAILED;
-    }
-    if (context->SetOutputDataType(0, queryDtype) != GRAPH_SUCCESS) {
-        return GRAPH_FAILED;
-    }
-    if (context->SetOutputDataType(1, ge::DT_FLOAT) != GRAPH_SUCCESS) {
-        return GRAPH_FAILED;
-    }
-    return context->SetOutputDataType(2, ge::DT_FLOAT);
+    return GRAPH_SUCCESS;
 }
 }  // namespace ge
 
@@ -325,48 +136,48 @@ public:
     explicit SparseFlashAttention(const char *name) : OpDef(name) {
         this->Input("query")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("key")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("value")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("sparse_indices")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("actual_seq_lengths_query")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("actual_seq_lengths_kv")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("query_rope")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("key_rope")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("attention_out")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("softmax_max_out")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("softmax_sum_out")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Attr("scale_value").AttrType(OPTIONAL).Float(0.0884);
         this->Attr("sparse_block_size").AttrType(OPTIONAL).Int(1);
         this->Attr("sparse_mode").AttrType(OPTIONAL).Int(3);

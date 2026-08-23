@@ -1,6 +1,6 @@
 # SparseFlashAttention design
 
-Status: scalar correctness baseline builds on CANN 8.5 and passes the local A3 matrix; platform Host contract remains unresolved after three correctly targeted submissions.
+Status: scalar correctness baseline builds on CANN 8.5, passes the local A3 matrix, and reaches CANNJudge Kernel result comparison; numerical/semantic correctness is now the active issue.
 
 ## 1. Contract boundary
 
@@ -65,15 +65,14 @@ The baseline therefore assigns whole `(B,Q,H)` rows to AIV cores. A core owns ev
 
 Host Tiling currently:
 
-1. validates rank-4 logical tensors and rank-1 optional actual-length tensors;
-2. derives `B`, `Q_S`, `KV_S`, `Q_N`, and `sparse_size` from runtime shapes;
-3. validates fixed dimensions `D=512`, `Dr=64`, `KV_N=1`;
-4. validates `query/key/value` dtype agreement and the reconciled float16/bfloat16/float32 compatibility domain;
-5. reads all five attributes;
-6. records presence of optional actual-length tensors;
-7. records independent primary/RoPE BF16 and FP32 dtype flags;
-8. launches `min(B*Q_S*Q_N, available_AIV_cores)` cores without auxiliary outputs and one core when auxiliary outputs are enabled;
-9. requests `usedCoreNum * 512 * sizeof(float)` workspace bytes.
+1. uses the same required/optional Tensor accessors as the official template;
+2. derives only the Kernel-required `B`, `Q_S`, `KV_S`, `Q_N`, and `sparse_size` runtime facts;
+3. relies on the generated ACLNN/official OpDef boundary for public-interface matching instead of returning `GRAPH_FAILED` for redundant business validation;
+4. reads all five attributes with template defaults when a pointer is absent;
+5. records optional actual-length presence and internal dtype flags;
+6. selects the official FP16/FP32 TilingKey;
+7. launches `min(B*Q_S*Q_N, available_AIV_cores)` cores without auxiliary outputs and one core when auxiliary outputs are enabled;
+8. advertises zero workspace because the kernel does not access GM workspace.
 
 The TilingData contains only internal runtime facts and does not alter the public interface.
 
@@ -123,29 +122,17 @@ The first implementation deliberately favors transparency over performance:
 - scalar exponential approximation using ln(2) range reduction and an eighth-order Taylor polynomial;
 - no UB queueing, no L1/L0 staging, no Cube matmul.
 
-Host Tiling retains the bounded compatibility workspace request, although the corrected kernel accumulator now resides in per-core UB:
+The corrected kernel accumulator resides in per-core UB and Host Tiling advertises no auxiliary workspace:
 
 ```text
-workspace_bytes = usedCoreNum * 512 * sizeof(float)
+workspace_bytes = 0
 ```
 
 This is expected to be slow. It exists to establish compiler/API and semantic correctness before optimization.
 
 ## 7. Shape and dtype inference
 
-`InferShape` sets:
-
-```text
-attention_out      = query.shape
-softmax_max_out    = (B, 1, Q_S, Q_N)
-softmax_sum_out    = (B, 1, Q_S, Q_N)
-```
-
-when optional output descriptors are present.
-
-`InferDataType` sets `attention_out` to query dtype and both auxiliary outputs to float32.
-
-The live package exposes float16/float32 while the live statement exposes float16/bfloat16. The retained OpDef accepts their union, float16/bfloat16/float32, and keeps auxiliary outputs float32. This compatibility extension is driven by contradictory platform evidence, not by a mathematical requirement.
+The current `InferShape` and `InferDataType` callbacks intentionally return `GRAPH_SUCCESS` without touching optional outputs, exactly as in the authoritative official template. Output metadata is left to the generated ACLNN/template path. The public OpDef and TilingKey expose only official float16/float32; the statement's BF16 wording remains UNRESOLVED against the package.
 
 ## 8. Variable lengths and masking
 
@@ -174,7 +161,7 @@ No extra `q / sparse_block_size` remapping is introduced without evaluator evide
 Current policy:
 
 - query/key/value and RoPE loads are converted to float32 for arithmetic;
-- BF16 storage is decoded/encoded with explicit round-to-nearest-even bit conversion, avoiding unsupported CANN 8.5 scalar BF16 casts;
+- internal BF16 conversion helpers remain in the kernel source for compatibility, but BF16 is not publicly selectable by the current OpDef/TilingKey;
 - content and RoPE dot products accumulate in float32;
 - the supplied `scale_value` is converted through float16 once in the kernel before use, matching the task statement's explicit scale-precision requirement;
 - online-softmax max/sum are float32;
@@ -192,14 +179,14 @@ The main remaining numerical approximation is scalar `exp`. If evaluator precisi
 | padded query row | zero output | verify evaluator convention |
 | block-wise selection | consume provided row directly | verify block-size cases |
 | scalar exp approximation | high-order range-reduced polynomial | replace with Ascend Vector Exp if precision fails |
-| package FP32 vs statement BF16 mismatch | accept the union internally | platform still rejects before Tiling/Kernel diagnosis is visible |
-| platform GetWorkspace `561002` | all three public cases fail before Kernel | require legal input metadata or Host/GE diagnostic from platform |
+| package FP32 vs statement BF16 mismatch | follow the authoritative package at the public ABI | BF16 exposure remains UNRESOLVED until platform evidence changes |
+| retired Host over-validation | permissive Host now reaches result comparison on all public cases | do not reintroduce rejection unless the official contract requires it for memory safety |
 
 ## 12. Local correctness evidence
 
 The CANN 8.5 local-A3 flow builds a temporary source mirror whose only target changes are `ascend910b` to `ascend910_93` in CMake and OpDef registration. The official source remains `ascend910b`.
 
-Direct ACLNN invocation loads the generated `libcust_opapi.so` and compares NPU results with an independent NumPy reference. The deterministic matrix passed 11/11 cases covering basic FP16 dataflow, shared KV heads, invalid sparse suffixes, nonzero RoPE, optional actual lengths, right-down causal mode with unequal sequence lengths, auxiliary outputs enabled/disabled, FP32, and direct ACL_BF16 tensors. No NaN or Inf values were observed.
+Direct ACLNN invocation loads the generated `libcust_opapi.so` and compares NPU results with an independent NumPy reference. The deterministic official-domain matrix passed 10/10 cases covering basic FP16 dataflow, shared KV heads, invalid sparse suffixes, nonzero RoPE, optional actual lengths, right-down causal mode with unequal sequence lengths, auxiliary outputs enabled/disabled, and FP32. No NaN or Inf values were observed.
 
 The local failures that led to the retained fixes were:
 
@@ -212,11 +199,11 @@ Completed locally:
 
 1. CANN 8.5 `ascend910b` compilation;
 2. temporary target-only A3 build and direct ACLNN invocation;
-3. independent-reference validation of nonzero RoPE, sparse modes 0/3, optional lengths, multiple query heads, optional LSE outputs, and FP16/BF16/FP32 paths;
+3. independent-reference validation of nonzero RoPE, sparse modes 0/3, optional lengths, multiple query heads, optional LSE outputs, and official FP16/FP32 paths;
 4. CANNJudge doctor identity check for contest/public/internal IDs;
-5. three valid platform submissions, each returning a submission ID and the same pre-Kernel `GetWorkspaceSize` error on all three public testcase references.
+5. a permissive-Host submission (`6a8a841282cffa8f16ab684b`) crossing GetWorkspace on all three public cases and returning Wrong Answer with precision ratios `0.134765625`, `0.216796875`, and `0.08203125`.
 
-No further platform upload is justified until the evaluator provides the rejected input contract or a Host/GE diagnostic identifying the failed check. Performance work remains blocked until platform correctness reaches Kernel execution.
+Host/Tiling dispatch is now unblocked. The next work must diagnose Kernel semantics/precision from the public ratios before any performance optimization.
 
 ## 14. Optimization directions after correctness
 

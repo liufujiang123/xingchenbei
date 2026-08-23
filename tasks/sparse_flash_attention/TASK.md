@@ -1,6 +1,6 @@
 # SparseFlashAttention task contract
 
-Status: verified problem identity and submission transport; CANN 8.5 compilation and local A3 correctness pass, but CANNJudge Host GetWorkspace remains blocked by platform contract inconsistency.
+Status: verified problem identity and submission transport; CANN 8.5 compilation and local A3 correctness pass; permissive Host Tiling now crosses CANNJudge GetWorkspace and reaches Kernel result comparison.
 
 ## Authoritative sources
 
@@ -34,20 +34,20 @@ Required/optional inputs, in the exact template order:
 
 | Pos | Name | Presence | Template dtype | Logical shape |
 |---:|---|---|---|---|
-| 0 | `query` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, Q_S, Q_N, 512)` |
-| 1 | `key` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, KV_S, 1, 512)` |
-| 2 | `value` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, KV_S, 1, 512)` |
+| 0 | `query` | required | float16 / float32 | `(B, Q_S, Q_N, 512)` |
+| 1 | `key` | required | float16 / float32 | `(B, KV_S, 1, 512)` |
+| 2 | `value` | required | float16 / float32 | `(B, KV_S, 1, 512)` |
 | 3 | `sparse_indices` | required | int32 | `(B, Q_S, 1, sparse_size)` |
 | 4 | `actual_seq_lengths_query` | optional | int32 | `(B,)` |
 | 5 | `actual_seq_lengths_kv` | optional | int32 | `(B,)` |
-| 6 | `query_rope` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, Q_S, Q_N, 64)` |
-| 7 | `key_rope` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, KV_S, 1, 64)` |
+| 6 | `query_rope` | required | float16 / float32 | `(B, Q_S, Q_N, 64)` |
+| 7 | `key_rope` | required | float16 / float32 | `(B, KV_S, 1, 64)` |
 
 Outputs, in exact template order:
 
 | Pos | Name | Presence | Template dtype | Logical shape |
 |---:|---|---|---|---|
-| 0 | `attention_out` | required | float16 / float32; live statement says float16 / bfloat16 | `(B, Q_S, Q_N, 512)` |
+| 0 | `attention_out` | required | float16 / float32 | `(B, Q_S, Q_N, 512)` |
 | 1 | `softmax_max_out` | optional | float32 | `(B, 1, Q_S, Q_N)` |
 | 2 | `softmax_sum_out` | optional | float32 | `(B, 1, Q_S, Q_N)` |
 
@@ -139,9 +139,7 @@ The input shape still contains one sparse-index row per physical query token. Th
 
 ## Dtype contract
 
-The live statement describes float16/bfloat16, while the fresh official package declares float16/float32. Three platform submissions all failed before Kernel launch with `aclnnSparseFlashAttentionGetWorkspaceSize(...)=561002`, including separate FP16/FP32 and FP16/BF16 variants. This proves the package and evaluator cannot currently be reconciled by choosing either second dtype alone, but it does not expose which input check failed.
-
-The retained compatibility baseline accepts float16, bfloat16, and float32 without changing names, positions, shapes, optionality, or semantics. `query`, `key`, and `value` must still share dtype; RoPE tensors may independently use any accepted primary dtype. BF16 is converted to/from FP32 arithmetic through explicit IEEE bit conversion because the CANN 8.5 910B compiler rejects scalar `bfloat16_t` casts.
+The live statement describes float16/bfloat16, while the fresh official package and the current platform-accepted interface declare float16/float32. The implementation now follows the official package at the public OpDef and TilingKey boundary. Whether BF16 must also be exposed remains UNRESOLVED and requires newer authoritative platform evidence; it is not silently added to the public ABI.
 
 ## Current baseline implementation
 
@@ -152,14 +150,14 @@ The first implementation is intentionally correctness-oriented:
 - score dot products accumulate in float32;
 - stable online softmax maintains a running max and denominator;
 - each AIV core owns a reusable `512 * float32` UB accumulator for the row it is currently processing;
-- Host Tiling still reserves `usedCoreNum * 512 * sizeof(float)` compatibility workspace, but the kernel does not access it;
+- Host Tiling advertises zero workspace because the kernel keeps the accumulator in per-core UB;
 - the final normalized accumulator is cast once into `attention_out`;
 - scalar exponential approximation with range reduction;
 - scalar GM outputs are explicitly cache-cleaned before row completion;
 - auxiliary-output mode uses one AIV core to avoid cross-core cache-line false sharing;
 - no Cube batching, UB gather aggregation, or performance tuning yet.
 
-The implementation builds under CANN 8.5 for `ascend910b` with three dtype binaries. A temporary target-only `ascend910_93` mirror passed 11/11 deterministic local ACLNN/NumPy cases, including direct ACL_BF16 storage and FP32. Platform correctness is blocked before Kernel launch.
+The implementation builds under CANN 8.5 for `ascend910b` with the two official dtype binaries. A temporary target-only `ascend910_93` mirror passed 10/10 deterministic local ACLNN/NumPy cases and a 39/39 GetWorkspaceSize-only matrix in the official FP16/FP32 domain. BF16 is intentionally not counted because it is not declared by the current public OpDef. Submission `6a8a841282cffa8f16ab684b` reached Kernel result comparison on all three public cases, proving the prior `561002` came from custom Host over-validation rather than the public ABI or Kernel dispatch.
 
 ## Remaining correctness questions for evaluator evidence
 
@@ -172,8 +170,8 @@ The public statement/template do not completely specify:
 - whether block-wise mode requires any additional row remapping beyond the provided `sparse_indices` tensor;
 - numerical tolerance and exceptional-value policy;
 - whether all declared float32 paths are exercised by the contest.
-- the exact legal platform input rejected as `561002`, or the corresponding Host/GE diagnostic log;
-- whether the evaluator expects the fresh package's FP32 second dtype, the statement's BF16 second dtype, or another generated-ACLNN contract.
+- which individual retired Host validation predicate rejected the platform call; this is no longer correctness-blocking because those checks were not required by the official template;
+- whether the evaluator will later replace the fresh package's FP32 second dtype with the statement's BF16 second dtype.
 
 These uncertainties must not be resolved by changing the public ABI. Use build/runtime/CANNJudge evidence to refine only internal behavior.
 
