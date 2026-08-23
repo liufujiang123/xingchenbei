@@ -1,267 +1,215 @@
 # SparseFlashAttention design
 
-Status: architecture reconciliation and correctness-baseline proposal only. No implementation or performance candidate is authorized until the ABI and semantic blockers in `TASK.md` are resolved.
+Status: contest ABI aligned; scalar correctness baseline implemented; build/validation pending.
 
-## 1. Evidence boundary
+## 1. Contract boundary
 
-This document separates:
+The checked-in `workspace/code/` is the current contest template. Its public interface is authoritative for submission. The task statement defines the required SparseFlashAttention mathematics.
 
-- **Logical contract facts**, taken from `B组困难题_SparseFlashAttention 算子.md`, confirmed by the user as the authoritative problem statement.
-- **Visible ABI facts**, taken from the complete official template under `workspace/code/`.
-- **Proposals**, explicitly labeled as such and not treated as competition facts.
+The implementation must preserve:
 
-The logical names cannot be assigned to similarly named template parameters without wrapper, packing, generated-registration, build, or evaluator evidence.
+- operator registration `SparseFlashAttention`;
+- kernel entrypoint `sparse_flash_attention`;
+- all input/output/attribute names, order, optionality, defaults, dtype declarations, and required filenames.
 
-## 2. Reconciled architecture view
+The earlier `DsaSfa` investigation is unrelated to this contest instance and is not an implementation constraint.
 
-The available evidence exposes two layers with an unresolved boundary:
+## 2. Mathematical dataflow
 
-```text
-Logical ACLNN V1 formulation from the statement
-  query, key, value, sparseIndices,
-  actual query/KV lengths, queryRope, keyRope,
-  scaleValue, sparseBlockSize, sparseMode,
-  attentionMode, returnSoftmaxLse
-                         |
-                         | unresolved wrapper / packing /
-                         | generated registration / ABI layer
-                         v
-Official template ABI
-  DsaSfa(values, sparse_index, gate, score;
-         scale=1.0)
-    -> (aggregated, agg_weights)
-                         |
-                         v
-Host tiling -> tiling key -> dsa_sfa kernel
-```
-
-The middle layer is not present in the repository. Consequently, the diagram records a required relationship but does not assert how any tensor crosses it.
-
-## 3. Logical semantics
-
-For each valid batch/query/head row, the statement requires sparse gather followed by MLA-absorb attention:
+For one logical output row `(b, q, h)`:
 
 ```text
-K_tilde       = gather(key, sparseIndices)
-V_tilde       = gather(value, sparseIndices)
-keyRope_tilde = gather(keyRope, sparseIndices)
-
-score = (query @ K_tilde^T
-         + queryRope @ keyRope_tilde^T) * scaleValue
-score = apply sparseMode mask to score
-
-rowMax       = max(score)
-expScore     = exp(score - rowMax)
-rowSum       = sum(expScore)
-attentionOut = (expScore / rowSum) @ V_tilde
+sparse_indices[b,q,0,:]
+        |
+        v
+valid KV positions -----> gather K / V / key_rope
+        |                         ^
+        |                         |
+query + query_rope --------------+
+        |
+        v
+score_k = (Q.K_k + QRope.KRope_k) * scale
+        |
+        +--> sparse_mode mask
+        |
+        v
+stable softmax over sparse positions
+        |
+        +--> optional row max / exp sum
+        |
+        v
+weighted sum of gathered V
+        |
+        v
+attention_out[b,q,h,:]
 ```
 
-The content dot-product width is `512`, the RoPE dot-product width is `64`, and value accumulation produces `512` output features. The single KV head is shared by all query heads. Full shapes, dtypes, modes, and unresolved semantic boundaries are recorded in `TASK.md`.
+The content dot width is fixed at `512`; the RoPE dot width is fixed at `64`; all query heads share the single KV head.
 
-## 4. Current official-template architecture
+## 3. Independent and serial axes
 
-### 4.1 Build and packaging
+Independent axes:
 
-- The top-level CMake project finds the ASC package, selects `ascend910b`, creates a run package named `custom`, and adds `op_host` and `op_kernel`.
-- The host CMake file generates operator/ACLNN sources from the host source, builds `cust_optiling` and `cust_opapi`, and packages both libraries.
-- The kernel CMake file builds `ascendc_kernels`, links it to the tiling library, and adds it to the package.
+- batch;
+- query position;
+- query head.
 
-### 4.2 Host registration and tiling
+Serial dependencies inside one row:
 
-The visible host implementation:
+- sparse positions participate in one shared softmax state;
+- the 512 output features share the same sparse softmax weights.
 
-1. Registers `DsaSfa` with four required tensors, two required outputs, and optional float attribute `scale=1.0`.
-2. Registers only the `ascend910b` configuration.
-3. Reads AIV core count and UB size from the platform.
-4. Fetches all four visible input tensors and the `scale` attribute.
-5. Uses only input-0 (`values`) dtype to select a float16/float32 tiling template.
-6. Stores only the total element count of `values` in `DsaSfaTilingData.length` as uint32.
-7. Launches the reported AIV core count and requests zero workspace.
-8. Returns success from shape and dtype inference without assigning output metadata.
+The baseline therefore assigns whole `(B,Q,H)` rows to AIV cores. A core owns every write to its row, so no inter-core reduction or synchronization is required.
 
-The template does not derive the logical dimensions, actual lengths, sparse size, masks, block size, RoPE layout, optional-output state, or a logical-to-packed mapping.
+## 4. Baseline Host Tiling
 
-### 4.3 Kernel
+Host Tiling currently:
 
-The visible `dsa_sfa` kernel receives the four inputs, two outputs, workspace, and tiling pointers. It reads the single `length` field, calls an empty `Init`, and then an empty `Process`. It therefore provides no current correctness baseline or additional mapping evidence.
+1. validates rank-4 logical tensors and rank-1 optional actual-length tensors;
+2. derives `B`, `Q_S`, `KV_S`, `Q_N`, and `sparse_size` from runtime shapes;
+3. validates fixed dimensions `D=512`, `Dr=64`, `KV_N=1`;
+4. validates `query/key/value` dtype agreement and the template's float16/float32 domain;
+5. reads all five attributes;
+6. records presence of optional actual-length tensors;
+7. records independent RoPE dtype flags;
+8. launches `min(B*Q_S*Q_N, available_AIV_cores)` cores;
+9. requests zero workspace.
 
-## 5. Logical-to-visible mapping
+The TilingData contains only internal runtime facts and does not alter the public interface.
 
-No row below is treated as resolved merely because names look related.
+## 5. Baseline row algorithm
 
-| Logical item | Visible candidate(s) | Status | Evidence needed |
-|---|---|---|---|
-| `query` | `values`, `gate`, or `score` | unresolved | Wrapper/packing code and runtime shapes/strides |
-| `key` | `values`, `gate`, or `score` | unresolved | Wrapper/packing code and runtime shapes/strides |
-| `value` | `values` is lexically suggestive only | unresolved | Wrapper/packing code and runtime shapes/strides |
-| `sparseIndices` | `sparse_index` is lexically and partly type-compatible | unresolved | Evaluator call and generated type/shape metadata |
-| `actual_seq_lengths_query` | no visible slot | unresolved | Wrapper default/packing representation |
-| `actual_seq_lengths_kv` | no visible slot | unresolved | Wrapper default/packing representation |
-| `queryRope` | no visible slot | unresolved | Wrapper/packing representation |
-| `keyRope` | no visible slot | unresolved | Wrapper/packing representation |
-| `scaleValue` | visible `scale` | unresolved; requiredness, type, precision, name, and default differ | Generated ACLNN signature and wrapper conversion |
-| `sparseBlockSize` | no visible attribute | unresolved | Wrapper specialization or packed metadata |
-| `sparseMode` | no visible attribute | unresolved | Wrapper specialization or packed metadata |
-| `attentionMode` | no visible attribute | unresolved | Wrapper specialization or packed metadata |
-| `returnSoftmaxLse` | no visible attribute | unresolved | Wrapper specialization and output-allocation behavior |
-| `pre_tokens`, `next_tokens` | no visible attributes | unresolved | Generated signature or proof that the wrapper fixes both constants |
-| `attentionOut` | `aggregated` is lexically suggestive only | unresolved | Evaluator output binding and expected shape/dtype |
-| `softmaxMaxOut` | `agg_weights` or packed output | unresolved | Wrapper output layout and evaluator assertions |
-| `softmaxSumOut` | `agg_weights` or packed output | unresolved | Wrapper output layout and evaluator assertions |
+The implementation uses online stable softmax so it does not need to materialize the sparse score vector or allocate workspace.
 
-## 6. Simplest correctness-baseline proposal
-
-This section is a proposal, not an implemented or validated design.
-
-### 6.1 Entry gate
-
-Before code generation:
-
-1. Resolve every ABI mapping needed to access all required logical inputs, attributes, and outputs without changing the visible interface.
-2. Resolve the semantic cases that would otherwise require invented behavior: invalid/empty sparse rows, block-wise index mapping, right-down-causal predicate, padded query outputs, and optional-output representation.
-3. Obtain the official build and correctness commands, reference behavior, and tolerance.
-4. Configure and snapshot the immutable interface guard.
-
-If the evidence shows that the supplied template is for a different operator or that a different official template must be used, follow the platform evidence rather than adapting `DsaSfa` speculatively.
-
-### 6.2 Proposed baseline decomposition
-
-After the gate is satisfied, use independent logical rows `(batch, query position, query head)` as the initial work units. Each row shares the batch's single KV head and its `sparseIndices` row. Distribute rows across available cores with a simple balanced assignment; process the sparse-index dimension in bounded tiles inside each row.
-
-This decomposition is proposed because every output row depends only on its query/query-RoPE row, the selected rows of the shared KV tensors, the relevant actual lengths, and the selected mask. No claim is made yet about the optimal core axis or tile size.
-
-### 6.3 Proposed correctness-first row algorithm
-
-For one resolved logical row:
+State for one row:
 
 ```text
-load query content and query RoPE
-determine effective query/KV lengths and whether the query row participates
-
-pass 1 over the sparse-index row:
-    stop/skip according to the resolved invalid-index rule
-    apply the resolved right-down-causal predicate when selected
-    gather key content and key RoPE
-    compute content_dot + rope_dot
-    apply the required scale conversion and scale the score
-    update a numerically stable row maximum
-
-pass 2 over the same effective indices:
-    recompute the scaled score
-    accumulate exp(score - row_max) into row_sum
-    accumulate exp(score - row_max) * gathered_value into the output vector
-
-normalize the output vector by row_sum
-cast/store attentionOut in the required output dtype
-conditionally store row_max and row_sum through the resolved auxiliary-output ABI
+m = running maximum score
+l = running sum of exp(score - m)
+acc[512] = running unnormalized weighted-value numerator
 ```
 
-This two-pass proposal favors transparent correctness and bounded intermediate storage. It deliberately accepts repeated gather/dot work for the baseline; changing it to online softmax, materialized scores, Cube-oriented batched matrix multiplication, or fused gather/matmul is optimization work and must wait for a passing baseline.
+For each valid sparse key with new score `s`:
 
-### 6.4 Proposed precision policy
+```text
+m_new = max(m, s)
+alpha = exp(m - m_new)        # zero for the first valid key
+beta  = exp(s - m_new)
+l_new = l * alpha + beta
+acc   = acc * alpha + beta * V_k
+```
 
-Use float32 dot-product accumulation, softmax maximum/sum, exponential values, normalization, and value accumulation for the initial float16/bfloat16 baseline, then cast `attentionOut` to the required dtype. Preserve the statement's explicit rule that the caller's `scaleValue` is processed with float16 precision before multiplying the complete content-plus-RoPE score.
+After all effective sparse keys:
 
-This is a baseline design choice intended to reduce numerical risk; the official evaluator tolerance and exceptional-value policy are still required before it can be declared sufficient.
+```text
+attention_out = acc / l
+softmax_max_out = m
+softmax_sum_out = l
+```
 
-### 6.5 Proposed Host Tiling responsibilities
+This is mathematically equivalent to stable softmax and avoids a score-sized temporary.
 
-Once the ABI is known, Host Tiling should derive from resolved runtime inputs rather than case IDs:
+## 6. Baseline physical implementation
 
-- logical `B`, `Q_S`, `KV_S`, `Q_N`, `sparse_size`, dtype, and target SOC;
-- presence/default representation of actual query and KV lengths;
-- `sparseBlockSize`, `sparseMode`, `attentionMode`, and optional-output state;
-- a balanced row-task count and sparse tile size subject to the device-reported memory resources;
-- workspace and internal tiling metadata required by the selected baseline path.
+The first implementation deliberately favors transparency over performance:
 
-No concrete tiling-data layout, block count, tile length, workspace size, or UB allocation can be finalized from the current ABI evidence.
+- direct scalar GM reads for query/key/value/RoPE/index tensors;
+- float32 dot-product accumulation;
+- float32 online-softmax state;
+- 512-wide accumulator stored in the owned `attention_out` row between sparse-key updates;
+- direct scalar GM writes;
+- scalar exponential approximation using ln(2) range reduction and an eighth-order Taylor polynomial;
+- no UB queueing, no L1/L0 staging, no Cube matmul, no workspace.
 
-### 6.6 Proposed symbolic memory plan
+This is expected to be slow. It exists to establish compiler/API and semantic correctness before optimization.
 
-The initial row path would require bounded local buffers for:
+## 7. Shape and dtype inference
 
-| Proposed buffer | Logical contents |
-|---|---|
-| query content | one `512`-element query vector |
-| query RoPE | one `64`-element query-RoPE vector |
-| sparse index tile | a bounded slice of one int32 index row |
-| gathered key content | selected `512`-element key rows, tiled as required |
-| gathered key RoPE | selected `64`-element key-RoPE rows, tiled as required |
-| gathered value | selected `512`-element value rows, tiled as required |
-| score/exp temporaries | one sparse tile or scalar stream in float32 |
-| output accumulator | one `512`-element float32 vector |
-| softmax state | float32 row maximum and sum |
+`InferShape` sets:
 
-Buffer counts, alignment, double buffering, and exact byte totals remain intentionally unspecified until the target SOC, ABI, compiler path, and device resource query are confirmed.
+```text
+attention_out      = query.shape
+softmax_max_out    = (B, 1, Q_S, Q_N)
+softmax_sum_out    = (B, 1, Q_S, Q_N)
+```
 
-### 6.7 Baseline coverage required before optimization
+when optional output descriptors are present.
 
-The correctness evaluator must cover, within the confirmed target platform's stated domain:
+`InferDataType` sets `attention_out` to query dtype and both auxiliary outputs to float32.
 
-- float16 and bfloat16 logical inputs;
-- supported query-head counts;
-- token-wise and supported block-wise selection;
-- `sparseMode=0` and `sparseMode=3`;
-- `None` and nontrivial actual query/KV lengths;
-- nonzero query/key RoPE contributions;
-- valid-prefix plus invalid-suffix sparse rows;
-- both values of `returnSoftmaxLse`;
-- boundary/tail shapes supplied by the platform.
+The template-visible dtype declarations remain unchanged: float16/float32 for primary tensors and float32 for auxiliary outputs.
 
-Cases for duplicates, empty effective rows, zero actual lengths, and padded query outputs cannot be assigned expected results until the corresponding semantics are supplied.
+## 8. Variable lengths and masking
 
-## 7. Precision and correctness risks
+Effective lengths are read from optional GM tensors when present, otherwise physical `Q_S/KV_S` are used. Values are clamped to the physical dimensions for memory safety.
 
-| Risk | Why it matters under the statement | Required resolution/control |
+Padded query rows currently produce zero attention output.
+
+For `sparse_mode=3`, the baseline interprets right-down causal as right-aligning the effective Q/KV sequences:
+
+```text
+key_pos <= query_pos + actual_kv_len - actual_query_len
+```
+
+For `sparse_mode=0`, only index validity and actual KV length apply.
+
+Invalid/out-of-range sparse indices are skipped. If no effective sparse key remains, the baseline returns zero attention output and, when requested, `max=-FLT_MAX`, `sum=0`. These edge conventions require evaluator confirmation.
+
+## 9. Sparse block handling
+
+The template supplies `sparse_indices` with a physical Q row for every query token. The baseline consumes the row belonging to the current `q` directly for all supported `sparse_block_size` values. It assumes the upstream index tensor already reflects shared block selection decisions.
+
+No extra `q / sparse_block_size` remapping is introduced without evaluator evidence.
+
+## 10. Precision policy
+
+Current policy:
+
+- query/key/value and RoPE loads are converted to float32 for arithmetic;
+- content and RoPE dot products accumulate in float32;
+- the supplied `scale_value` is converted through float16 once in the kernel before use, matching the task statement's explicit scale-precision requirement;
+- online-softmax max/sum are float32;
+- the value numerator is mathematically float32, but in this scalar baseline it is stored back through `attention_out` between sparse steps, so float16 queries incur intermediate float16 rounding.
+
+That last point is a known baseline precision risk. If compilation succeeds but evaluator precision is close rather than exact, the first precision improvement should move the 512-wide accumulator into UB as float32 without changing the algorithm.
+
+## 11. Known correctness risks
+
+| Risk | Current baseline choice | Next evidence/fix |
 |---|---|---|
-| Scale conversion | Interface value is double but computation uses float16 precision | Match official conversion/rounding evidence exactly |
-| Content-plus-RoPE score | Omitting the `64`-wide RoPE dot product violates MLA-absorb semantics | Include nonzero-RoPE reference cases |
-| Stable softmax | Long or high-magnitude rows can overflow without max subtraction | Retain the defined max/subtract/exp/sum flow |
-| Mask ordering | Masked or invalid entries must not enter max, sum, or value accumulation | Obtain exact invalid and causal predicates |
-| Variable lengths | Padding is excluded from computation but padded output values are undefined | Obtain reference behavior before storing padded rows |
-| Empty effective rows | `max` and division are undefined without a specified convention | Do not choose zero/NaN/other behavior without evidence |
-| Auxiliary outputs | Their exact behavior depends on scale, mask, padding, and optional-output ABI | Validate them independently against evaluator output |
-| Logical/template dtype mismatch | BF16 is required logically but absent from template declarations | Resolve wrapper conversion or obtain corrected template |
+| right-down causal alignment | standard effective-length right alignment | verify with evaluator/reference |
+| empty sparse row | zero output, max=-FLT_MAX, sum=0 | verify evaluator convention |
+| padded query row | zero output | verify evaluator convention |
+| block-wise selection | consume provided row directly | verify block-size cases |
+| scalar exp approximation | high-order range-reduced polynomial | replace with Ascend Vector Exp if precision fails |
+| FP16 accumulator spill | output row used as running accumulator | move accumulator to FP32 UB |
+| float32 template path | implemented for content tensors | confirm platform actually tests it |
+| BF16 statement/template mismatch | do not alter public template | follow contest template/evaluator |
 
-## 8. Unresolved contradictions and required evidence
+## 12. Build and validation plan
 
-The exhaustive reconciliation register is the table `Unresolved contract/template reconciliation` in `TASK.md`. Its unresolved items are:
+Next actions on the server:
 
-- ABI-01 through ABI-15: operator identity, tensor arity/mapping, attribute binding, output binding, dtype/shape inference, optional inputs/outputs, RoPE/mode transport, and target SOC.
-- SEM-01 through SEM-13: invalid/duplicate/empty sparse rows, block-wise indexing, causal alignment, padding, optional-output default, auxiliary values, scale domain, actual-length/shape bounds, dtype relationships, and per-input contiguity requirements.
-- NUM-01: numerical reference and tolerance.
-- PERF-01: scored cases and scoring/evaluation contract.
+1. build this exact branch with the contest-compatible CANN 8.5/910B path already established by the mature harness;
+2. use `ascendc-operator-compile-debug` only to make the smallest API/compiler fixes;
+3. do not change the public interface or baseline mathematics to silence compiler errors;
+4. add a local CPU/Python reference test for small shapes if the generated ACLNN package can be invoked;
+5. validate nonzero RoPE, sparse-mode 0/3, optional lengths, multiple query heads, and optional LSE outputs;
+6. only after correctness evidence, submit/benchmark and start performance work.
 
-None of these is resolved by the empty kernel or by lexical similarity between logical and template names.
+No build, runtime, or correctness result is claimed in this document yet.
 
-## 9. Deferred optimization candidates
+## 13. Optimization directions after correctness
 
-Only after the proposed baseline builds and passes the official correctness evaluator should individual measured candidates be considered:
+Once the scalar baseline passes, likely high-impact dimensions are:
 
-- sparse gather aggregation and locality;
-- row versus head versus sparse-index multicore partitioning;
-- Matmul/MMAD utilization for content and RoPE score components;
-- sparse tile sizing and tails;
-- GM/L1/UB residency and buffering;
-- Vector/Cube overlap;
-- online softmax or reduced score materialization.
+- keep Q/Q-RoPE and FP32 output accumulator in UB;
+- aggregate contiguous sparse-index runs before GM copy;
+- gather K/K-RoPE/V in sparse tiles;
+- compute multiple sparse scores with Cube/Matmul/MMAD instead of scalar dots;
+- use Vector `Exp/ReduceMax/ReduceSum` or a tiled online-softmax pipeline;
+- overlap gather, Cube score calculation, Vector softmax, and V accumulation;
+- tune ownership across query rows, heads, and sparse tiles;
+- specialize full/tail sparse tiles through internal TilingKey regimes.
 
-Each candidate must preserve the resolved ABI and full required domain, change one major dimension, and pass guard, build, validation, and official benchmarking before promotion.
-
-## 10. Implementation readiness checklist
-
-- [x] Authoritative logical statement identified and extracted.
-- [x] Complete official template inspected.
-- [x] Logical-to-visible mapping recorded without assumptions.
-- [x] Contradictions and required evidence catalogued.
-- [x] Correctness-baseline algorithm proposed without implementation.
-- [ ] External operator symbol and wrapper/packing ABI resolved.
-- [ ] All required logical inputs/attributes/outputs mapped.
-- [ ] Invalid, empty-row, block-wise, causal, and padding semantics resolved.
-- [ ] Numerical reference and tolerance supplied.
-- [ ] Target SOC and supported platform subset confirmed.
-- [ ] Build, validation, benchmark, and profile commands configured.
-- [ ] Interface guard configured and snapshotted.
-- [ ] Baseline implemented, built, and validated.
-
-The design is not ready for code generation while any ABI or correctness-semantic prerequisite above remains unresolved.
+Each optimization must preserve the current contest-visible interface and re-pass correctness before promotion.
