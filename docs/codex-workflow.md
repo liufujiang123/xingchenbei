@@ -1,18 +1,24 @@
 # Codex workflow
 
-Open the repository root as the VS Code workspace (or launch Codex from the repository root in CLI environments).
+The authoritative workflow is intentionally short.
 
-Suggested first instruction:
+1. Follow root/nested `AGENTS.md` and the task's authoritative competition contract/template.
+2. At the start of a new task conversation, run `context_state.py bootstrap --new-session` once; reuse unchanged context instead of rereading stable files.
+3. Use `task_state.py` before citing old build/correctness/performance evidence.
+4. Let Codex handle ordinary implementation/debugging. Use `xingchen-kernel-optimizer` and the design/performance catalogs when Ascend-specific knowledge or bottleneck reasoning is useful.
+5. Run target build -> correctness -> same-case benchmark. Profile only for a concrete unanswered bottleneck question.
+6. Never claim local proxy results as target-platform proof.
+7. Never submit externally unless the user explicitly authorizes it; `agent_loop.py platform` requires `--submit`.
 
-```text
-Follow AGENTS.md. Inspect the task contract, problem statement, and official template.
-Use $cannjudge-submit only for CANNJudge platform facts/actions, and use the installed AscendC skills for design, tiling, kernel, compile/debug, precision, and performance work.
-Never request a plaintext CANNJudge password, never expose credential/key material, and do not submit unless I explicitly authorize submission.
-First establish the simplest correct baseline. Do not optimize before build and correctness pass.
-After baseline, use $xingchen-kernel-optimizer and docs/ascend-optimization-playbook.md.
-Before changing performance code, classify the hot path as vector/cube/mixed_cv, draw the Ascend resource/dependency graph (MTE/V/Cube/Scalar/on-chip memory/workspace), identify the measured bottleneck, then generate a candidate shortlist with tools/ascend_perf_plan.py.
-Treat pipeline overlap as a first-class optimization: MTE<->V for vector kernels and C(tile n+1)||V(tile n) for mixed Cube/Vector kernels when dependencies permit. Do not force C/V techniques onto pure Vector operators.
-Run the evaluation-driven loop with one major hypothesis per candidate: guard, target build, correctness, same-case benchmark, profile when needed, then keep/reject with evidence.
+Typical commands:
+
+```bash
+python3 tools/context_state.py bootstrap --task <task> --new-session
+python3 tools/task_state.py --task <task>
+python3 tools/agent_loop.py validate --task <task>
+python3 tools/agent_loop.py baseline --task <task> --name baseline
+python3 tools/agent_loop.py diagnose --task <task>
+python3 tools/agent_loop.py candidate --task <task> --name <candidate> --hypothesis '<one mechanism>'
 ```
 
-Never infer success from source inspection. The configured shell commands and, when explicitly used, CANNJudge-returned submission evidence are the source of truth.
+Use `python3 tools/agent_loop.py --help` and the relevant Skill when more detail is actually needed; do not preload every document or experience body.
