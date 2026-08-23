@@ -140,8 +140,9 @@ The first implementation is intentionally correctness-oriented:
 - sparse K/V and RoPE rows are read directly from GM;
 - score dot products accumulate in float32;
 - stable online softmax maintains a running max and denominator;
-- the 512-wide weighted value accumulator is maintained directly in the output row;
-- zero workspace;
+- each AIV core owns a reusable `512 * float32` workspace accumulator for the row it is currently processing;
+- workspace size is `usedCoreNum * 512 * sizeof(float)` and does not grow with sequence length or sparse size;
+- the final normalized accumulator is cast once into `attention_out`;
 - scalar exponential approximation with range reduction;
 - no Cube batching, UB gather aggregation, or performance tuning yet.
 
