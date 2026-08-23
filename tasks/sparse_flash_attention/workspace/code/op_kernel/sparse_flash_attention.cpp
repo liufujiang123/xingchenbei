@@ -22,6 +22,7 @@ public:
                                 GM_ADDR actual_seq_lengths_kv, GM_ADDR query_rope,
                                 GM_ADDR key_rope, GM_ADDR attention_out,
                                 GM_ADDR softmax_max_out, GM_ADDR softmax_sum_out,
+                                GM_ADDR workspace,
                                 const SparseFlashAttentionTilingData &tiling) {
         query_ = reinterpret_cast<__gm__ DT_QUERY *>(query);
         key_ = reinterpret_cast<__gm__ DT_QUERY *>(key);
@@ -36,6 +37,7 @@ public:
         attentionOut_ = reinterpret_cast<__gm__ DT_QUERY *>(attention_out);
         softmaxMaxOut_ = reinterpret_cast<__gm__ float *>(softmax_max_out);
         softmaxSumOut_ = reinterpret_cast<__gm__ float *>(softmax_sum_out);
+        workspaceAcc_ = reinterpret_cast<__gm__ float *>(workspace);
 
         batchSize_ = tiling.batchSize;
         querySeqLen_ = tiling.querySeqLen;
@@ -59,7 +61,7 @@ public:
         const uint64_t coreId = static_cast<uint64_t>(AscendC::GetBlockIdx());
         const uint64_t coreCount = usedCoreNum_ == 0 ? 1 : usedCoreNum_;
         for (uint64_t row = coreId; row < totalRows_; row += coreCount) {
-            ProcessRow(row);
+            ProcessRow(row, coreId);
         }
     }
 
@@ -112,8 +114,8 @@ private:
         return ClampLength(actualKvLen_[batch], kvSeqLen_);
     }
 
-    // Accurate enough scalar exp baseline for x <= 0. Range reduction keeps the
-    // polynomial on [-ln(2), 0], then applies an exact power-of-two scale by repeated 0.5.
+    // Scalar correctness baseline for exp(x), x <= 0. Range reduction keeps the
+    // polynomial on [-ln(2), 0], then applies a power-of-two scale.
     __aicore__ inline float ExpNegative(float x) const {
         if (x >= 0.0F) {
             return 1.0F;
@@ -139,7 +141,6 @@ private:
         if (sparseMode_ != 3) {
             return true;
         }
-        // rightDownCausal: align the right edge of the effective Q and KV sequences.
         const int64_t limit = static_cast<int64_t>(queryPos) +
                               static_cast<int64_t>(kvLen) -
                               static_cast<int64_t>(queryLen);
@@ -163,7 +164,7 @@ private:
         return dot * scaleValue_;
     }
 
-    __aicore__ inline void ZeroRow(uint64_t row, bool writeAux) {
+    __aicore__ inline void StoreZeroOutput(uint64_t row, bool writeAux) {
         const uint64_t outBase = row * CONTENT_DIM;
         for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
             attentionOut_[outBase + d] = static_cast<DT_QUERY>(0.0F);
@@ -174,7 +175,7 @@ private:
         }
     }
 
-    __aicore__ inline void ProcessRow(uint64_t row) {
+    __aicore__ inline void ProcessRow(uint64_t row, uint64_t coreId) {
         const uint64_t head = row % queryHeadNum_;
         const uint64_t queryRow = row / queryHeadNum_;
         const uint64_t queryPos = queryRow % querySeqLen_;
@@ -184,13 +185,13 @@ private:
         const uint64_t actualQueryLen = GetActualQueryLen(batch);
         const uint64_t actualKvLen = GetActualKvLen(batch);
         if (queryPos >= actualQueryLen || actualKvLen == 0) {
-            ZeroRow(row, writeAux);
+            StoreZeroOutput(row, writeAux);
             return;
         }
 
-        const uint64_t outBase = row * CONTENT_DIM;
+        const uint64_t accBase = coreId * CONTENT_DIM;
         for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            attentionOut_[outBase + d] = static_cast<DT_QUERY>(0.0F);
+            workspaceAcc_[accBase + d] = 0.0F;
         }
 
         const uint64_t indexBase = (batch * querySeqLen_ + queryPos) * sparseSize_;
@@ -224,9 +225,8 @@ private:
             const float newSum = runningSum * alpha + beta;
             const uint64_t valueBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
             for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-                const float oldAcc = hasValue ? static_cast<float>(attentionOut_[outBase + d]) : 0.0F;
-                const float newAcc = oldAcc * alpha + beta * ReadValue(valueBase + d);
-                attentionOut_[outBase + d] = static_cast<DT_QUERY>(newAcc);
+                const float oldAcc = workspaceAcc_[accBase + d];
+                workspaceAcc_[accBase + d] = oldAcc * alpha + beta * ReadValue(valueBase + d);
             }
 
             runningMax = newMax;
@@ -235,14 +235,14 @@ private:
         }
 
         if (!hasValue || runningSum <= 0.0F) {
-            ZeroRow(row, writeAux);
+            StoreZeroOutput(row, writeAux);
             return;
         }
 
         const float invSum = 1.0F / runningSum;
+        const uint64_t outBase = row * CONTENT_DIM;
         for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            const float normalized = static_cast<float>(attentionOut_[outBase + d]) * invSum;
-            attentionOut_[outBase + d] = static_cast<DT_QUERY>(normalized);
+            attentionOut_[outBase + d] = static_cast<DT_QUERY>(workspaceAcc_[accBase + d] * invSum);
         }
         if (writeAux) {
             softmaxMaxOut_[row] = runningMax;
@@ -264,6 +264,7 @@ private:
     __gm__ DT_QUERY *attentionOut_;
     __gm__ float *softmaxMaxOut_;
     __gm__ float *softmaxSumOut_;
+    __gm__ float *workspaceAcc_;
 
     uint64_t batchSize_;
     uint64_t querySeqLen_;
@@ -293,6 +294,6 @@ __global__ __aicore__ void sparse_flash_attention(
     KernelSparseFlashAttention<DT_QUERY> op;
     op.Init(query, key, value, sparse_indices, actual_seq_lengths_query,
             actual_seq_lengths_kv, query_rope, key_rope, attention_out,
-            softmax_max_out, softmax_sum_out, tiling_data);
+            softmax_max_out, softmax_sum_out, workspace, tiling_data);
     op.Process();
 }
