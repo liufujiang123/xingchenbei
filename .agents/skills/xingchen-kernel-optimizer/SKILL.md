@@ -147,18 +147,41 @@ When mechanisms interact, usually inspect in this order:
 5. tiling/regime tuning;
 6. advanced hardware-path/register microkernel.
 
+## Evidence freshness
+
+Runtime evidence is valid only for the world state that produced it. When `tools/evidence_fingerprint.py` is present, Harness runs bind each `build / validate / bench / profile / platform` stage to:
+
+- evaluated implementation (`subject_hash`);
+- task/gate configuration and referenced scripts;
+- validation/benchmark case set;
+- selected non-secret CANN/SOC/device environment identity;
+- stage command context.
+
+Use:
+
+```bash
+python3 tools/task_state.py --task <task>
+```
+
+before citing old evidence. `fresh` means the current implementation and relevant execution context still match. `stale` means rerun the affected gate before claiming it as proof. Legacy evidence without a fingerprint is `unknown`, never silently treated as fresh.
+
+A source change makes old correctness/build evidence stale, but source changes are expected between performance candidates and therefore do **not** by themselves make two benchmark scores incomparable. Benchmark comparison requires the same `bench_context_hash`: build/bench gate, cases, environment and relevant config must match. If the context differs, start a new best-score lineage instead of claiming faster/slower.
+
+Optional task config can narrow/extend fingerprint scope with `EVIDENCE_SUBJECT_PATHS`, `EVIDENCE_CASE_PATHS`, `EVIDENCE_CONTEXT_PATHS`, and non-secret `EVIDENCE_ENV_KEYS`. Never put credentials in these fields.
+
 ## Candidate evidence loop
 
 For each meaningful candidate record only: hypothesis + evidence level, expected Ascend resource effect, one major mechanism, added UB/L1/workspace/code-size and correctness/precision risk, and exact same-case evaluation.
 
 Run target build -> correctness -> same-case benchmark. Profile only when it answers the next concrete question. Decide `PROMOTE`, `REJECT`, or `INCONCLUSIVE`; keep failed experiments as evidence and do not stack unproven mechanisms.
 
-Promotion requires interface compatibility, required correctness/precision coverage, measured improvement beyond noise, and no legal-domain narrowing. Local proxy results remain proxy; platform conclusions require actual platform evidence.
+Promotion requires interface compatibility, required correctness/precision coverage, **fresh** evidence for the current subject, measured improvement beyond noise, and no legal-domain narrowing. Local proxy results remain proxy; platform conclusions require actual platform evidence.
 
 ## Tool routing
 
 - already loaded context -> `context_state.py`; do not reread.
-- current task/evidence state -> `task_state.py`.
+- current task/evidence freshness -> `task_state.py`.
+- inspect the current fingerprint -> `evidence_fingerprint.py`.
 - design experience -> `ascend_design_analyze.py`.
 - unknown performance bottleneck -> `agent_loop.py diagnose` or `ascend_perf_analyze.py`.
 - known class+bottleneck -> `ascend_perf_plan.py`.
@@ -172,4 +195,4 @@ If a referenced Harness tool is absent on the current branch, do not invent resu
 
 ## Reporting
 
-Do not spend tokens proving Harness compliance. Report new contract facts/conflicts, diagnosed bottleneck and evidence level, selected/rejected experience, meaningful code decisions, gate results, measured performance, and blockers.
+Do not spend tokens proving Harness compliance. Report new contract facts/conflicts, diagnosed bottleneck and evidence level, selected/rejected experience, meaningful code decisions, gate results with freshness, measured performance with comparability, and blockers.
