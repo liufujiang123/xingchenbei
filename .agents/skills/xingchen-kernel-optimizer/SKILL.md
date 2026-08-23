@@ -1,257 +1,198 @@
 ---
 name: xingchen-kernel-optimizer
-description: Contract-first Ascend C competition operator development and evidence-driven optimization with research-derived design/performance guidance selected on demand.
+description: Ascend operator engineering router for competition tasks: reuse context, protect contract/correctness, diagnose Vector/Cube/Mixed-CV bottlenecks, discover research-derived optimization experience, route to the right tool, and validate evidence-backed candidates.
 ---
 
 # Xingchen Kernel Optimizer
 
-Coordinate an operator from contract/design through correctness baseline and performance optimization. Correctness and the platform-visible interface are always higher priority than performance.
+Use this as the compact professional map for Ascend operator work. Keep specialized Ascend knowledge and tool routing here; let Codex handle ordinary C++/Python engineering, code reading, refactoring, and general debugging without a scripted ritual.
 
-## Sources of truth
+## Start/resume without rereading
 
-Use this order:
-
-1. nearest `AGENTS.md`;
-2. task statement/template and current verified platform evidence;
-3. target CANN/SOC build and correctness results;
-4. measured benchmark/profile evidence;
-5. official Ascend skills and this repository's design/performance pattern libraries.
-
-Use `cannjudge-submit` only for platform facts/actions. Never submit without explicit user authorization and never expose credentials.
-
-Use the official Ascend skills for architecture/tiling, code generation, compile/debug, precision, performance evaluation and optimization. This skill coordinates them; it does not replace them.
-
-# Part I — Operator development
-
-Use for a new operator, missing baseline, or major architecture rewrite. Do not force a full redesign for a small bug fix.
-
-Read:
-
-- `docs/ascend-operator-development.md`
-- `tasks/<task>/TASK.md`
-- official statement/template/package
-- `tasks/<task>/design.md` when present
-
-Start with:
+At a new Codex conversation for a task:
 
 ```bash
-python3 tools/agent_loop.py design \
-  --task <task> \
-  --name initial-design
+python3 tools/context_state.py bootstrap --task <task> --new-session
+python3 tools/task_state.py --task <task>
 ```
 
-After reading the contract, Codex may add broad archetype hints:
+Do this once. Reuse stable instructions already in model context. If context may be stale:
 
 ```bash
-python3 tools/agent_loop.py design \
-  --task <task> \
-  --archetype reduction \
-  --name initial-design
+python3 tools/context_state.py check --task <task>
+python3 tools/context_state.py use --task <task> <path>
 ```
 
-Allowed archetypes: `elementwise`, `broadcast`, `reduction`, `scan`, `recurrent`, `sparse`, `gather`, `matmul`, `normalization`, `attention`, `composite`.
+Unchanged -> reuse context. Changed -> consume diff first. Full reread is last resort. Load another Skill through `context_state.py use` so it is not ritualistically reopened.
 
-Declared archetypes are hints, not contract facts. Static suggestions are weaker still. Never infer semantics from filenames, identifiers, or another project's conventions.
+## Contract, correctness, and operator development
 
-## Experience discovery works like skill discovery
+Authority: current competition/platform evidence -> repository/task contract -> official template -> official Ascend Skills/references -> assumptions.
 
-The design knowledge base may be broad, but Codex must not receive every pattern in full detail.
+Protect public ABI and mathematical semantics. Keep scheduling choices internal to Host Tiling, workspace, templates, and kernel implementation. Do not narrow supported dtype/shape/mode ranges, guess hidden cases, weaken correctness, or report unexecuted gates as passing.
 
-Instead:
+For a new/uncertain operator resolve only correctness-critical facts first: ABI, equations/dependencies, supported domain, precision semantics, target CANN/SOC, required files/package. Then build the simplest contract-complete baseline.
 
-1. expose the **complete experience catalog** as short summaries;
-2. let Codex read all summaries and perform the semantic relevance match itself;
-3. treat `machine_suggestions` only as weak navigation hints;
-4. let Codex select at most **3** experience ids relevant to the current design question;
-5. load full `decide / guardrails / validate` text only for those selected ids.
-
-This is intentionally similar to choosing a Skill from its name/description before reading the full Skill.
-
-The normal `design` record contains:
-
-```text
-design.experience_catalog     # every pattern, summary only
-design.machine_suggestions    # weak source/archetype hints
-design.selected_decisions     # empty unless Codex explicitly selected patterns
-```
-
-Codex must inspect **all** entries in `experience_catalog` before deciding that a pattern is irrelevant. It may select a pattern that is absent from `machine_suggestions`.
-
-For a terminal view of the whole summary catalog:
+When available, use design experience as a catalog rather than a mandatory ceremony:
 
 ```bash
 python3 tools/ascend_design_analyze.py --task <task>
+python3 tools/ascend_design_analyze.py --task <task> --select-pattern <pattern-id>
 ```
 
-After Codex chooses relevant experience ids:
+Read catalog summaries once; Codex chooses relevant patterns. Design topics include contract consistency, stage/dependency graph, task ownership, layout, Host Tiling/tails, memory lifetime/workspace, precision, reduction/scan/recurrent/sparse/Cube/Mixed-CV architecture, target separation, and validation boundaries.
+
+Official Ascend Skills are on-demand specialists: `ascendc-operator-design`, `code-gen`, `compile-debug`, `precision-debug`, `mssanitizer`, `performance-eval`, `performance-optim`.
+
+## Ascend performance resource model
+
+Before optimizing, identify the hot-path class and actual dependency graph.
+
+- **Vector:** `S -> MTE2 -> UB -> V -> UB -> MTE3`. Inspect copy/compute/copy overlap, UB working set, reduction/scan passes, scalar issue overhead, core occupancy.
+- **Cube:** `S -> MTE2 -> L1 -> MTE1 -> L0A/L0B -> M -> L0C -> FIX`. Inspect M/N/K ownership, L1 residency, streaming side, K-loop pipeline, output-block bubbles, Cube occupancy.
+- **Mixed C/V:** `AIC/Cube <-> workspace/on-chip handoff <-> AIV/Vector`, plus MTE and cross-core sync. Distinguish true-ready dependencies from workspace-slot reuse; model legal producer lead, live workspace, ring capacity, prologue/drain.
+
+Never copy fixed tile sizes, stage counts, ring depths, sync intervals, AIC:AIV ratios, or thresholds from another kernel.
+
+## Bottleneck diagnosis
+
+Evidence confidence is:
+
+`profile-observed > configured hypothesis > static source risk`
+
+Static source patterns suggest risks; they do not prove measured bottlenecks.
+
+Bottleneck tags:
+- `pipeline`: bubbles/stalls between overlap-capable stages.
+- `memory` / `bandwidth`: excessive GM transfers, MTE waits, repeated scans/materialization.
+- `cache`: poor L1/L2 reuse, thrashing, bad working-set/order.
+- `compute`: Vector/Cube useful execution dominates.
+- `underutilization`: too few or imbalanced useful tasks.
+- `scalar`: control/address/div-mod/launch/sync issue dominates short kernels.
+- `synchronization`: flags/barriers/handshakes serialize work.
+- `tiling`: tile/regime choice hurts occupancy/resources/tails.
+- `sparse`: gather/page/index traffic and fragmentation dominate.
+
+Preferred integrated diagnosis when supported:
 
 ```bash
-python3 tools/ascend_design_analyze.py \
-  --task <task> \
-  --select-pattern <pattern-id> \
-  --select-pattern <pattern-id>
+python3 tools/agent_loop.py diagnose --task <task> --name pre-candidate
 ```
 
-Select only the patterns needed for the current question. Do not expand the whole catalog merely to be safe.
-
-A selected pattern is advisory. Codex may reject it with a reason tied to the authoritative contract, target API, resource budget, build/correctness evidence, or measured behavior.
-
-## What belongs in a catalog summary
-
-A summary should be enough for semantic routing but not enough to prescribe the answer. It includes:
-
-- pattern id;
-- design phase;
-- broad applicability;
-- one short description of the decision/problem the experience addresses.
-
-It does not include full implementation guidance, validation detail, fixed tile sizes, core counts, stage counts, ring depths, TilingKey thresholds, or copied reference-project parameters.
-
-## Design decisions Codex must eventually resolve
-
-The retained `tasks/<task>/design.md` should eventually cover these topics, but the Harness does not inject all of them as simultaneous prompts:
-
-- immutable contract and legal dtype/shape/mode/optional domain;
-- mathematical stage/dependency graph;
-- dependency axes versus independent axes;
-- logical task/core ownership before micro-tiling;
-- physical layout, strides and host-materialization risks;
-- Host Tiling responsibilities and genuine regime boundaries;
-- aligned full-tile and partial-tail handling;
-- register/UB/L1/L0/workspace/GM lifetime plan;
-- storage/compute/accumulator/output precision semantics;
-- correctness matrix from semantic and hardware boundaries.
-
-## High-value architecture questions
-
-The experience catalog includes reusable lessons for:
-
-- **elementwise/broadcast** — independent tile axes, broadcast staging and a simple GM→UB→V→GM baseline;
-- **reduction/normalization** — ownership, merge cost, accumulator semantics and full-data pass count;
-- **scan/recurrent** — carried-state locality and orthogonal parallelism;
-- **sparse/gather/paged** — index/page/chunk semantics before locality/coalescing;
-- **Cube/matmul** — M/N/K ownership and resident-versus-streaming operand roles;
-- **mixed Cube+Vector** — producer/consumer, ready/reuse edges and safe in-flight distance before flags/rings/stages;
-- **layout/tiling/memory/precision/platform/validation** — generic decisions that apply across operator families.
-
-Do not copy fixed tiles, stage counts, ring depths, synchronization intervals, transfer thresholds or AIC:AIV ratios from reference projects.
-
-## Codex autonomy
-
-The Harness supplies a map of proven questions and failure modes. Codex owns the concrete solution.
-
-The Harness must not choose exact mathematical reformulations, tile sizes, core counts, queue depths, ring depths, UB/L1/L0 layouts, TilingKey counts/thresholds, or specializations.
-
-Codex should use the catalog to notice relevant experience, then decide from the current operator, target CANN/SOC, official APIs and evidence.
-
-## Baseline completion gate
-
-Before performance work:
-
-- public interface unchanged;
-- target build passes;
-- required correctness/precision matrix passes;
-- any local target adaptation is scoped and auditable;
-- `tasks/<task>/design.md` matches the retained architecture.
-
-# Part II — Performance optimization
-
-Read:
-
-- `docs/ascend-optimization-playbook.md`
-- `docs/ascend-kernel-research.md`
-- `tasks/<task>/optimization-log.md` when present
-
-Before choosing a candidate, prefer:
+Direct source/profile diagnosis:
 
 ```bash
-python3 tools/agent_loop.py diagnose \
+python3 tools/ascend_perf_analyze.py \
   --task <task> \
-  --name pre-candidate
+  [--profile-file <file>] \
+  [--operator-class auto|vector|cube|mixed_cv] \
+  [--bottleneck-hint <tag>] \
+  [--advanced]
 ```
 
-With fresh build/correctness evidence, a cheap source-only pass may use `--skip-build --skip-validate --skip-profile`.
+Use source-only analysis as hypothesis generation. If the next decision depends on whether pipeline/cache/sync behavior is real, profile it. Profile wrappers may emit genuine `HARNESS_OPERATOR_CLASS`, `HARNESS_BOTTLENECKS`, and `HARNESS_PROFILE_NOTE` markers.
 
-Evidence priority is:
+## Research-derived optimization experience
 
-`profile-observed > configured hypothesis > static source risk`.
+When present, `config/ascend_optimization_patterns.json` is the reusable experience registry. Keep this summary catalog in mind; load detailed `when / try / avoid / evidence` only when relevant.
 
-Never report a static risk as a measured bottleneck.
+**Common**
+- `common.multicore_balance` — rebalance legal independent work across cores.
+- `common.dependency_aware_partition` — keep recurrence chains local; parallelize orthogonal axes.
+- `common.working_set_liveness` — derive buffers/rings from live ranges, async hazards, cache/on-chip fit.
+- `common.locality_schedule` — order independent work for reuse and GM bandwidth deconfliction.
+- `common.fuse_fragmented_staging` — assemble sparse/paged/indexed fragments directly in UB/L1 when legal.
+- `common.remove_scalar_overhead` — hoist/simplify address, control, tiny-loop, and sync issue work.
+- `common.regime_autotune` — benchmark a small hardware-pruned regime set.
+- `common.hardware_path_audit` *(advanced)* — inspect anomalously slow dtype/shape/API lowering.
 
-## Performance model
+**Vector**
+- `vector.mte_v_overlap` — overlap MTE2 / V / MTE3 across independent tiles.
+- `vector.reduce_pass_fusion` — reduce repeated full GM scans with a numerically valid online/fused state.
+- `vector.scan_blocking` — keep serial scan state local and vectorize orthogonal work.
+- `vector.instruction_fusion` — replace scalar/slice issue with whole-tile/compound Vector work.
+- `vector.microapi_register_kernel` *(advanced)* — RegTensor/MaskReg only for a proven hotspot.
 
-Classify the hot path as one primary family:
+**Cube**
+- `cube.preload_pipeline` — address output-block boundary bubbles beyond inner-loop ping-pong.
+- `cube.asymmetric_residency` — keep the reusable operand resident; stream the other side.
+- `cube.split_axis_for_occupancy` — split reduction work only when occupancy gain beats extra reduction/write cost.
 
-- `vector`: `GM -> UB -> V -> UB -> GM`
-- `cube`: `GM -> L1 -> L0 -> Cube -> L0C/FIX -> GM`
-- `mixed_cv`: substantial Cube and Vector stages exchange tiles/workspace
+**Mixed C/V**
+- `mixed_cv.credit_window` — replace unnecessary lockstep with bounded dependency-safe producer lead.
+- `mixed_cv.sync_batch` — batch legal cross-core synchronization with correct tail flush.
+- `mixed_cv.workspace_liveness_ring` — size workspace rings from lifetime/dependency/cache fit.
+- `mixed_cv.internal_fusion` *(advanced)* — shorten proven handoff/materialization only with API/SOC support.
 
-For the relevant resources, model Scalar, MTE1/MTE2/MTE3, Vector, Cube, UB/L1/L0, workspace and synchronization edges.
+## From diagnosis to candidate
 
-For each wait/barrier ask:
+If class and bottleneck are already known:
 
-- true data dependency or buffer/workspace reuse?
-- how much work may safely be in flight?
-- which values remain live across that lead distance?
+```bash
+python3 tools/ascend_perf_plan.py \
+  --task <task> \
+  --operator-class <vector|cube|mixed_cv> \
+  --bottleneck <tag>
+```
 
-## Research-derived performance questions
+Use additional `--bottleneck` only for supported symptoms. Use `--advanced` only after ordinary decomposition/layout/movement/pipeline fixes are insufficient and target API/SOC evidence justifies it.
 
-Use only when supported by evidence:
+Prefer diagnosis-generated ranking when available because it preserves evidence provenance, but Codex may choose another catalog pattern when the real dependency/resource model supports it.
 
-- keep recurrence chains local and parallelize orthogonal axes;
-- size rings/stages from live ranges, async hazards and cache/on-chip capacity;
-- improve cache reuse or phase-shift independent traversal when cores contend for the same GM phase;
-- assemble sparse/paged fragments directly in UB/L1 when legal instead of materializing GM intermediates;
-- reduce full GM passes when an online/pass-fused formulation preserves numerical semantics;
-- verify anomalously slow dtype/shape/API combinations use the intended hardware path;
-- use a small hardware-pruned regime search rather than blind autotuning.
-
-High-value lessons from production kernels:
-
-- more buffers/stages are not monotonically better;
-- only asynchronously shared buffers need multi-buffering;
-- ping-pong can still leave output-block boundary bubbles;
-- resident and streaming operands are asymmetric;
-- per-task C/V ready/wait can create lockstep;
-- synchronization may sometimes be batched, but true dependencies and tail flush remain mandatory;
-- task order affects both cache reuse and synchronized GM contention;
-- reducing GM traffic can justify extra Vector arithmetic;
-- MicroAPI/register kernels are advanced tools for a proven hotspot, not a default rewrite.
-
-## One-candidate rule
-
-Each candidate states:
-
-- hypothesis;
-- evidence level and bottleneck;
-- expected Ascend resource/pipeline effect;
-- one major mechanism changed;
-- added UB/L1/workspace/code-size cost;
-- correctness/precision risk;
-- exact same-case evaluation plan.
-
-Then run target build → correctness → benchmark. Profile only to answer a concrete question. Do not stack an unproven mechanism into the retained implementation.
-
-When mechanisms interact, prefer this order:
-
-1. dependency-safe task decomposition;
-2. layout/data movement;
-3. buffering/residency/pipeline;
-4. synchronization/window tuning;
-5. tiling/regime autotune;
+When mechanisms interact, usually inspect in this order:
+1. dependency-safe task decomposition / occupancy;
+2. layout and data movement;
+3. working-set residency / buffering / pipeline;
+4. synchronization/window;
+5. tiling/regime tuning;
 6. advanced hardware-path/register microkernel.
 
-## Promotion
+## Evidence freshness
 
-Promote only when:
+Runtime evidence is valid only for the world state that produced it. When `tools/evidence_fingerprint.py` is present, Harness runs bind each `build / validate / bench / profile / platform` stage to:
 
-- public interface unchanged;
-- target build passes;
-- required correctness/precision passes;
-- same-case performance improves beyond noise;
-- no required shape/dtype/mode domain is narrowed;
-- target/proxy evidence is labeled correctly.
+- evaluated implementation (`subject_hash`);
+- task/gate configuration and referenced scripts;
+- validation/benchmark case set;
+- selected non-secret CANN/SOC/device environment identity;
+- stage command context.
 
-Record `PROMOTE`, `REJECT` or `INCONCLUSIVE`, including failed experiments.
+Use:
 
-CANNJudge score is authoritative platform evidence only when actually returned by CANNJudge. Local proxy measurements are not target-platform proof. Never optimize by guessing hidden testcases.
+```bash
+python3 tools/task_state.py --task <task>
+```
+
+before citing old evidence. `fresh` means the current implementation and relevant execution context still match. `stale` means rerun the affected gate before claiming it as proof. Legacy evidence without a fingerprint is `unknown`, never silently treated as fresh.
+
+A source change makes old correctness/build evidence stale, but source changes are expected between performance candidates and therefore do **not** by themselves make two benchmark scores incomparable. Benchmark comparison requires the same `bench_context_hash`: build/bench gate, cases, environment and relevant config must match. If the context differs, start a new best-score lineage instead of claiming faster/slower.
+
+Optional task config can narrow/extend fingerprint scope with `EVIDENCE_SUBJECT_PATHS`, `EVIDENCE_CASE_PATHS`, `EVIDENCE_CONTEXT_PATHS`, and non-secret `EVIDENCE_ENV_KEYS`. Never put credentials in these fields.
+
+## Candidate evidence loop
+
+For each meaningful candidate record only: hypothesis + evidence level, expected Ascend resource effect, one major mechanism, added UB/L1/workspace/code-size and correctness/precision risk, and exact same-case evaluation.
+
+Run target build -> correctness -> same-case benchmark. Profile only when it answers the next concrete question. Decide `PROMOTE`, `REJECT`, or `INCONCLUSIVE`; keep failed experiments as evidence and do not stack unproven mechanisms.
+
+Promotion requires interface compatibility, required correctness/precision coverage, **fresh** evidence for the current subject, measured improvement beyond noise, and no legal-domain narrowing. Local proxy results remain proxy; platform conclusions require actual platform evidence.
+
+## Tool routing
+
+- already loaded context -> `context_state.py`; do not reread.
+- current task/evidence freshness -> `task_state.py`.
+- inspect the current fingerprint -> `evidence_fingerprint.py`.
+- design experience -> `ascend_design_analyze.py`.
+- unknown performance bottleneck -> `agent_loop.py diagnose` or `ascend_perf_analyze.py`.
+- known class+bottleneck -> `ascend_perf_plan.py`.
+- real pipeline/cache/sync evidence -> configured profile / `ascendc-operator-performance-eval`.
+- compile/runtime failure -> `ascendc-operator-compile-debug`.
+- numerical mismatch -> `ascendc-operator-precision-debug`.
+- target-specific optimization question -> `ascendc-operator-performance-optim`.
+- platform identity/package/submission -> CANNJudge tooling; submission is explicit only.
+
+If a referenced Harness tool is absent on the current branch, do not invent results or casually rebuild it. Use the corresponding official Ascend Skill/manual evidence path, or deliberately port the generic Harness capability.
+
+## Reporting
+
+Do not spend tokens proving Harness compliance. Report new contract facts/conflicts, diagnosed bottleneck and evidence level, selected/rejected experience, meaningful code decisions, gate results with freshness, measured performance with comparability, and blockers.

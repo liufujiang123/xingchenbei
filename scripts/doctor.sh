@@ -42,13 +42,17 @@ fi
 
 python3 -m py_compile \
   "$ROOT/tools/agent_loop.py" \
+  "$ROOT/tools/context_state.py" \
+  "$ROOT/tools/task_state.py" \
+  "$ROOT/tools/evidence_fingerprint.py" \
   "$ROOT/tools/ascend_design_analyze.py" \
   "$ROOT/tools/ascend_perf_analyze.py" \
   "$ROOT/tools/ascend_perf_plan.py"
 echo "ok: harness python syntax"
 
+python3 "$ROOT/tests/harness/test_context_state.py"
+python3 "$ROOT/tests/harness/test_evidence_fingerprint.py"
+python3 "$ROOT/tests/harness/test_task_state.py"
 python3 "$ROOT/tests/harness/test_ascend_design_analyze.py"
-echo "ok: harness design self-test"
-
 python3 "$ROOT/tests/harness/test_ascend_perf_analyze.py"
-echo "ok: harness diagnosis self-test"
+echo "ok: harness self-tests"
