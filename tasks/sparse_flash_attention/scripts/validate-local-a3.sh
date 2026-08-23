@@ -81,6 +81,15 @@ timeout "${SPARSE_FLASH_ATTENTION_VALIDATE_TIMEOUT:-300}" \
     python -u "${task_dir}/tests/test_sparse_flash_attention.py" "${case_name}" --device "${device_id}" \
     2>&1 | tee "${log_dir}/correctness.log"
 
+if [[ "${case_name}" == "all" ]]; then
+    timeout "${SPARSE_FLASH_ATTENTION_VALIDATE_TIMEOUT:-300}" \
+        python -u "${task_dir}/tests/test_sparse_flash_attention_blockwise.py" --device "${device_id}" \
+        2>&1 | tee "${log_dir}/blockwise-correctness.log"
+fi
+
 echo "CUSTOM_SHARED_LIBRARY=${custom_lib}"
 echo "CORRECTNESS_LOG=${log_dir}/correctness.log"
+if [[ "${case_name}" == "all" ]]; then
+    echo "BLOCKWISE_CORRECTNESS_LOG=${log_dir}/blockwise-correctness.log"
+fi
 echo "SPARSE_FLASH_ATTENTION_LOCAL_A3_PASS"
