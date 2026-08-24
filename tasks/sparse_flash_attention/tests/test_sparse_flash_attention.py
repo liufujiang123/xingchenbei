@@ -7,7 +7,8 @@ import argparse
 import ctypes
 import json
 import os
-from dataclasses import dataclass
+from pathlib import Path
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -355,6 +356,21 @@ def make_case(
     return case
 
 
+def make_content_only_single_index_case() -> Case:
+    case = make_case(
+        "L_content_single_index",
+        [[2]],
+        kvs=4,
+        dtype=np.dtype(np.float16),
+        return_aux=True,
+    )
+    return replace(
+        case,
+        query_rope=np.zeros_like(case.query_rope),
+        key_rope=np.zeros_like(case.key_rope),
+    )
+
+
 def build_cases() -> list[Case]:
     fp16 = np.dtype(np.float16)
     fp32 = np.dtype(np.float32)
@@ -419,6 +435,15 @@ def build_cases() -> list[Case]:
             actual_kv=4,
             sparse_mode=3,
         ),
+        make_case(
+            "L_rope_single_index",
+            [[2]],
+            kvs=4,
+            dtype=fp16,
+            rope_only=True,
+            return_aux=True,
+        ),
+        make_content_only_single_index_case(),
     ]
 
 
@@ -991,9 +1016,19 @@ def acl_dtype_name(override: int | None, storage_dtype: np.dtype) -> str:
     return str(storage_dtype)
 
 
-def run_case(op: SparseFlashAttentionAclnn, case: Case) -> dict[str, object]:
+def run_case(
+    op: SparseFlashAttentionAclnn,
+    case: Case,
+    dump_output_dir: Path | None = None,
+) -> dict[str, object]:
     expected_attention, expected_max, expected_sum = cpu_reference(case)
     actual_attention, actual_max, actual_sum = op.run(case)
+    if dump_output_dir is not None:
+        dump_output_dir.mkdir(parents=True, exist_ok=True)
+        np.save(dump_output_dir / f"{case.name}-attention.npy", actual_attention)
+        if actual_max is not None:
+            np.save(dump_output_dir / f"{case.name}-softmax-max.npy", actual_max)
+            np.save(dump_output_dir / f"{case.name}-softmax-sum.npy", actual_sum)
     attention_abs, attention_rel = error_metrics(
         actual_attention, expected_attention, case.primary_acl_dtype
     )
@@ -1072,6 +1107,11 @@ def main() -> int:
         action="store_true",
         help="run the nontrivial 910B target-launch correctness matrix",
     )
+    parser.add_argument(
+        "--dump-output-dir",
+        type=Path,
+        help="save direct D2H attention/max/sum arrays for device differential probes",
+    )
     args = parser.parse_args()
     cases = (build_workspace_cases() if args.workspace_only_matrix else
              build_910b_launch_cases() if args.launch_matrix else build_cases())
@@ -1085,7 +1125,7 @@ def main() -> int:
         if args.workspace_only_matrix or args.workspace_only:
             results = [op.get_workspace_size(case) for case in selected]
         else:
-            results = [run_case(op, case) for case in selected]
+            results = [run_case(op, case, args.dump_output_dir) for case in selected]
     finally:
         runtime.close()
     if args.workspace_only_matrix or args.workspace_only:

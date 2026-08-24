@@ -30,6 +30,14 @@ enum class ExpExperiment : uint32_t {
     VECTOR = 0,
     SCALAR_POLYNOMIAL = 1,
 };
+enum class BufferPositionExperiment : uint32_t {
+    LEGACY_VECCALC = 0,
+    STANDARD_VECIN_VECOUT = 1,
+};
+enum class DotResultExperiment : uint32_t {
+    LOCAL_TENSOR = 0,
+    ACCUMULATOR_REGISTER = 1,
+};
 
 constexpr bool AGGREGATE_KEY_INSTEAD_OF_VALUE = false;
 constexpr ScaleExperiment SCALE_EXPERIMENT = ScaleExperiment::ATTRIBUTE;
@@ -42,6 +50,18 @@ constexpr bool TWO_PASS_SOFTMAX = false;
 // not alter the public operator interface or the required mathematics.
 constexpr RopeDotExperiment ROPE_DOT_EXPERIMENT = RopeDotExperiment::VECTOR_REDUCE;
 constexpr ExpExperiment EXP_EXPERIMENT = ExpExperiment::VECTOR;
+constexpr BufferPositionExperiment BUFFER_POSITION_EXPERIMENT =
+    BufferPositionExperiment::LEGACY_VECCALC;
+constexpr DotResultExperiment DOT_RESULT_EXPERIMENT = DotResultExperiment::LOCAL_TENSOR;
+
+constexpr AscendC::TPosition INPUT_BUFFER_POSITION =
+    BUFFER_POSITION_EXPERIMENT == BufferPositionExperiment::STANDARD_VECIN_VECOUT
+        ? AscendC::TPosition::VECIN
+        : AscendC::TPosition::VECCALC;
+constexpr AscendC::TPosition OUTPUT_BUFFER_POSITION =
+    BUFFER_POSITION_EXPERIMENT == BufferPositionExperiment::STANDARD_VECIN_VECOUT
+        ? AscendC::TPosition::VECOUT
+        : AscendC::TPosition::VECCALC;
 }  // namespace
 
 template <class DT_QUERY>
@@ -180,9 +200,19 @@ private:
             AscendC::Cast(destination, raw, AscendC::RoundMode::CAST_NONE, count);
             AscendC::PipeBarrier<PIPE_V>();
         } else {
-            AscendC::DataCopy(destination, source[offset], count);
+            if constexpr (BUFFER_POSITION_EXPERIMENT ==
+                          BufferPositionExperiment::STANDARD_VECIN_VECOUT) {
+                AscendC::DataCopy(raw, source[offset], count);
+            } else {
+                AscendC::DataCopy(destination, source[offset], count);
+            }
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
+            if constexpr (BUFFER_POSITION_EXPERIMENT ==
+                          BufferPositionExperiment::STANDARD_VECIN_VECOUT) {
+                AscendC::DataCopy(destination, raw, count);
+                AscendC::PipeBarrier<PIPE_V>();
+            }
         }
     }
 
@@ -194,6 +224,10 @@ private:
         AscendC::ReduceSum(reduce_, product_, reduceWork_, count);
         AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
         AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+        if constexpr (DOT_RESULT_EXPERIMENT ==
+                      DotResultExperiment::ACCUMULATOR_REGISTER) {
+            return AscendC::GetAccVal<float>();
+        }
         return reduce_.GetValue(0);
     }
 
@@ -326,9 +360,19 @@ private:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
             AscendC::DataCopy(attentionOutGm_[outBase], outputRaw_, CONTENT_DIM);
         } else {
+            if constexpr (BUFFER_POSITION_EXPERIMENT ==
+                          BufferPositionExperiment::STANDARD_VECIN_VECOUT) {
+                AscendC::DataCopy(outputRaw_, accumulator_, CONTENT_DIM);
+                AscendC::PipeBarrier<PIPE_V>();
+            }
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
-            AscendC::DataCopy(attentionOutGm_[outBase], accumulator_, CONTENT_DIM);
+            if constexpr (BUFFER_POSITION_EXPERIMENT ==
+                          BufferPositionExperiment::STANDARD_VECIN_VECOUT) {
+                AscendC::DataCopy(attentionOutGm_[outBase], outputRaw_, CONTENT_DIM);
+            } else {
+                AscendC::DataCopy(attentionOutGm_[outBase], accumulator_, CONTENT_DIM);
+            }
         }
         // The same UB buffers are reused by the following row.
         AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
@@ -535,21 +579,21 @@ private:
     AscendC::GlobalTensor<float> softmaxSumOutGm_;
 
     AscendC::TPipe pipe_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> queryRawBuf_;
+    AscendC::TBuf<INPUT_BUFFER_POSITION> queryRawBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> queryFp32Buf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> queryRopeRawBuf_;
+    AscendC::TBuf<INPUT_BUFFER_POSITION> queryRopeRawBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> queryRopeFp32Buf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> kvRawBuf_;
+    AscendC::TBuf<INPUT_BUFFER_POSITION> kvRawBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> kvFp32Buf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> keyRopeRawBuf_;
+    AscendC::TBuf<INPUT_BUFFER_POSITION> keyRopeRawBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> keyRopeFp32Buf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> accumulatorBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> productBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> reduceBuf_;
     AscendC::TBuf<AscendC::TPosition::VECCALC> reduceWorkBuf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> outputRawBuf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> auxMaxBuf_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> auxSumBuf_;
+    AscendC::TBuf<OUTPUT_BUFFER_POSITION> outputRawBuf_;
+    AscendC::TBuf<OUTPUT_BUFFER_POSITION> auxMaxBuf_;
+    AscendC::TBuf<OUTPUT_BUFFER_POSITION> auxSumBuf_;
 
     AscendC::LocalTensor<DT_QUERY> queryRaw_;
     AscendC::LocalTensor<float> queryFp32_;
