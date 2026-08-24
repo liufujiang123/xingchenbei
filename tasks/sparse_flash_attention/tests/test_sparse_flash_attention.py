@@ -963,6 +963,11 @@ def main() -> int:
         action="store_true",
         help="call GetWorkspaceSize over the legal-domain matrix without launching a kernel",
     )
+    parser.add_argument(
+        "--workspace-only",
+        action="store_true",
+        help="call GetWorkspaceSize for the selected regular correctness case without launching a kernel",
+    )
     args = parser.parse_args()
     cases = build_workspace_cases() if args.workspace_only_matrix else build_cases()
     selected = cases if args.case == "all" else [case for case in cases if case.name == args.case]
@@ -972,13 +977,13 @@ def main() -> int:
     runtime = AclRuntime(args.device)
     try:
         op = SparseFlashAttentionAclnn(runtime)
-        if args.workspace_only_matrix:
+        if args.workspace_only_matrix or args.workspace_only:
             results = [op.get_workspace_size(case) for case in selected]
         else:
             results = [run_case(op, case) for case in selected]
     finally:
         runtime.close()
-    if args.workspace_only_matrix:
+    if args.workspace_only_matrix or args.workspace_only:
         passed = sum(
             result["return_code"] == ACL_SUCCESS and result["executor_created"]
             for result in results
