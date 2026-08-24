@@ -72,16 +72,23 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context) {
 
     auto platform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     const uint32_t reportedCoreNumAiv = platform.GetCoreNumAiv();
-    // The generic CANN 8.5 Ascend910B platform record reports zero standalone
-    // VectorCore units even though the contest binary is an AIV kernel. Do not
-    // reject otherwise legal inputs because that platform metadata is coarse;
-    // one block is a correctness-safe fallback on the actual 910B target.
-    const uint32_t usableCoreNumAiv = reportedCoreNumAiv == 0 ? 1U : reportedCoreNumAiv;
-    // Scalar auxiliary writes share cache lines across adjacent rows. Keep the
-    // correctness baseline single-core when those optional outputs are enabled.
-    const uint64_t usedCore64 = returnSoftmaxLse
-        ? 1U
-        : std::min<uint64_t>(totalRows, static_cast<uint64_t>(usableCoreNumAiv));
+    const uint32_t reportedCoreNum = platform.GetCoreNum();
+    // CANN 8.5 may report zero standalone VectorCore units for the 910B MIX
+    // platform record. In that case use the platform's generic core count
+    // before falling back to one correctness core.
+    const uint32_t usableCoreNumAiv = reportedCoreNumAiv != 0
+        ? reportedCoreNumAiv
+        : (reportedCoreNum != 0 ? reportedCoreNum : 1U);
+    // Auxiliary values are emitted in aligned groups of eight float rows. A
+    // complete 32-byte cache line is therefore owned by one core, which keeps
+    // the multi-core path free of adjacent-row false sharing.
+    constexpr uint64_t AUX_ROWS_PER_GROUP = 8U;
+    const uint64_t logicalTaskNum = returnSoftmaxLse
+        ? (totalRows + AUX_ROWS_PER_GROUP - 1U) / AUX_ROWS_PER_GROUP
+        : totalRows;
+    const uint64_t usedCore64 = std::min<uint64_t>(
+        logicalTaskNum == 0 ? 1U : logicalTaskNum,
+        static_cast<uint64_t>(usableCoreNumAiv));
     const uint32_t usedCoreNum = static_cast<uint32_t>(usedCore64);
 
     uint32_t DT_QUERY = static_cast<uint32_t>(queryDtype);
@@ -136,48 +143,48 @@ public:
     explicit SparseFlashAttention(const char *name) : OpDef(name) {
         this->Input("query")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("key")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("value")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("sparse_indices")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("actual_seq_lengths_query")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("actual_seq_lengths_kv")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_INT32, ge::DT_INT32})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_INT32, ge::DT_INT32, ge::DT_INT32})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("query_rope")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("key_rope")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("attention_out")
             .ParamType(REQUIRED)
-            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("softmax_max_out")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("softmax_sum_out")
             .ParamType(OPTIONAL)
-            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+            .DataType({ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
         this->Attr("scale_value").AttrType(OPTIONAL).Float(0.0884);
         this->Attr("sparse_block_size").AttrType(OPTIONAL).Int(1);
         this->Attr("sparse_mode").AttrType(OPTIONAL).Int(3);

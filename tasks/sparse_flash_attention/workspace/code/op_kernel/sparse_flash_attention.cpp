@@ -1,4 +1,6 @@
 // Kernel侧核函数实现
+#include <type_traits>
+
 #include "kernel_operator.h"
 
 #include "sparse_flash_attention_tiling.h"
@@ -7,9 +9,8 @@
 namespace {
 constexpr uint64_t CONTENT_DIM = 512;
 constexpr uint64_t ROPE_DIM = 64;
+constexpr uint64_t AUX_ROWS_PER_GROUP = 8;
 constexpr float NEG_INF = -3.402823466e+38F;
-constexpr float LN2 = 0.6931471805599453F;
-constexpr float INV_LN2 = 1.4426950408889634F;
 }  // namespace
 
 template <class DT_QUERY>
@@ -24,157 +25,153 @@ public:
                                 GM_ADDR softmax_max_out, GM_ADDR softmax_sum_out,
                                 GM_ADDR workspace,
                                 const SparseFlashAttentionTilingData &tiling) {
-        queryHalf_ = reinterpret_cast<__gm__ half *>(query);
-        queryRaw_ = reinterpret_cast<__gm__ uint16_t *>(query);
-        queryFloat_ = reinterpret_cast<__gm__ float *>(query);
-        keyHalf_ = reinterpret_cast<__gm__ half *>(key);
-        keyRaw_ = reinterpret_cast<__gm__ uint16_t *>(key);
-        keyFloat_ = reinterpret_cast<__gm__ float *>(key);
-        valueHalf_ = reinterpret_cast<__gm__ half *>(value);
-        valueRaw_ = reinterpret_cast<__gm__ uint16_t *>(value);
-        valueFloat_ = reinterpret_cast<__gm__ float *>(value);
-        sparseIndices_ = reinterpret_cast<__gm__ int32_t *>(sparse_indices);
-        actualQueryLen_ = reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_query);
-        actualKvLen_ = reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_kv);
-        queryRopeHalf_ = reinterpret_cast<__gm__ half *>(query_rope);
-        queryRopeRaw_ = reinterpret_cast<__gm__ uint16_t *>(query_rope);
-        queryRopeFloat_ = reinterpret_cast<__gm__ float *>(query_rope);
-        keyRopeHalf_ = reinterpret_cast<__gm__ half *>(key_rope);
-        keyRopeRaw_ = reinterpret_cast<__gm__ uint16_t *>(key_rope);
-        keyRopeFloat_ = reinterpret_cast<__gm__ float *>(key_rope);
-        attentionOutHalf_ = reinterpret_cast<__gm__ half *>(attention_out);
-        attentionOutRaw_ = reinterpret_cast<__gm__ uint16_t *>(attention_out);
-        attentionOutFloat_ = reinterpret_cast<__gm__ float *>(attention_out);
-        softmaxMaxOut_ = reinterpret_cast<__gm__ float *>(softmax_max_out);
-        softmaxSumOut_ = reinterpret_cast<__gm__ float *>(softmax_sum_out);
-        pipe_.InitBuffer(accBuf_, CONTENT_DIM * sizeof(float));
-        accumulator_ = accBuf_.Get<float>();
-
         batchSize_ = tiling.batchSize;
         querySeqLen_ = tiling.querySeqLen;
         kvSeqLen_ = tiling.kvSeqLen;
         queryHeadNum_ = tiling.queryHeadNum;
         sparseSize_ = tiling.sparseSize;
         totalRows_ = tiling.totalRows;
-        primaryIsBf16_ = tiling.primaryIsBf16;
-        primaryIsFloat_ = tiling.primaryIsFloat;
-        queryRopeIsBf16_ = tiling.queryRopeIsBf16;
-        queryRopeIsFloat_ = tiling.queryRopeIsFloat;
-        keyRopeIsBf16_ = tiling.keyRopeIsBf16;
-        keyRopeIsFloat_ = tiling.keyRopeIsFloat;
         hasActualQueryLen_ = tiling.hasActualQueryLen;
         hasActualKvLen_ = tiling.hasActualKvLen;
         sparseBlockSize_ = tiling.sparseBlockSize == 0 ? 1U : tiling.sparseBlockSize;
         sparseMode_ = tiling.sparseMode;
         returnSoftmaxLse_ = tiling.returnSoftmaxLse;
         usedCoreNum_ = tiling.usedCoreNum;
-
         // The statement requires scaleValue to be processed at float16 precision.
         scaleValue_ = static_cast<float>(static_cast<half>(tiling.scaleValue));
+
+        queryGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(query));
+        keyGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(key));
+        valueGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(value));
+        sparseIndicesGm_.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(sparse_indices));
+        queryRopeGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(query_rope));
+        keyRopeGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(key_rope));
+        attentionOutGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(attention_out));
+        if (hasActualQueryLen_ != 0) {
+            actualQueryLenGm_.SetGlobalBuffer(
+                reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_query));
+        }
+        if (hasActualKvLen_ != 0) {
+            actualKvLenGm_.SetGlobalBuffer(
+                reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_kv));
+        }
+        if (returnSoftmaxLse_ != 0) {
+            softmaxMaxOutGm_.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(softmax_max_out));
+            softmaxSumOutGm_.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(softmax_sum_out));
+        }
+
+        pipe_.InitBuffer(queryRawBuf_, CONTENT_DIM * sizeof(DT_QUERY));
+        pipe_.InitBuffer(queryFp32Buf_, CONTENT_DIM * sizeof(float));
+        pipe_.InitBuffer(queryRopeRawBuf_, ROPE_DIM * sizeof(DT_QUERY));
+        pipe_.InitBuffer(queryRopeFp32Buf_, ROPE_DIM * sizeof(float));
+        pipe_.InitBuffer(kvRawBuf_, CONTENT_DIM * sizeof(DT_QUERY));
+        pipe_.InitBuffer(kvFp32Buf_, CONTENT_DIM * sizeof(float));
+        pipe_.InitBuffer(keyRopeRawBuf_, ROPE_DIM * sizeof(DT_QUERY));
+        pipe_.InitBuffer(keyRopeFp32Buf_, ROPE_DIM * sizeof(float));
+        pipe_.InitBuffer(accumulatorBuf_, CONTENT_DIM * sizeof(float));
+        pipe_.InitBuffer(productBuf_, CONTENT_DIM * sizeof(float));
+        pipe_.InitBuffer(reduceBuf_, AUX_ROWS_PER_GROUP * sizeof(float));
+        pipe_.InitBuffer(reduceWorkBuf_, CONTENT_DIM * sizeof(float));
+        pipe_.InitBuffer(outputRawBuf_, CONTENT_DIM * sizeof(DT_QUERY));
+        pipe_.InitBuffer(auxMaxBuf_, AUX_ROWS_PER_GROUP * sizeof(float));
+        pipe_.InitBuffer(auxSumBuf_, AUX_ROWS_PER_GROUP * sizeof(float));
+
+        queryRaw_ = queryRawBuf_.Get<DT_QUERY>();
+        queryFp32_ = queryFp32Buf_.Get<float>();
+        queryRopeRaw_ = queryRopeRawBuf_.Get<DT_QUERY>();
+        queryRopeFp32_ = queryRopeFp32Buf_.Get<float>();
+        kvRaw_ = kvRawBuf_.Get<DT_QUERY>();
+        kvFp32_ = kvFp32Buf_.Get<float>();
+        keyRopeRaw_ = keyRopeRawBuf_.Get<DT_QUERY>();
+        keyRopeFp32_ = keyRopeFp32Buf_.Get<float>();
+        accumulator_ = accumulatorBuf_.Get<float>();
+        product_ = productBuf_.Get<float>();
+        reduce_ = reduceBuf_.Get<float>();
+        reduceWork_ = reduceWorkBuf_.Get<float>();
+        outputRaw_ = outputRawBuf_.Get<DT_QUERY>();
+        auxMax_ = auxMaxBuf_.Get<float>();
+        auxSum_ = auxSumBuf_.Get<float>();
     }
 
     __aicore__ inline void Process() {
         const uint64_t coreId = static_cast<uint64_t>(AscendC::GetBlockIdx());
-        const uint64_t coreCount = usedCoreNum_ == 0 ? 1 : usedCoreNum_;
-        for (uint64_t row = coreId; row < totalRows_; row += coreCount) {
-            ProcessRow(row);
+        const uint64_t coreCount = usedCoreNum_ == 0 ? 1U : usedCoreNum_;
+        if (returnSoftmaxLse_ == 0) {
+            for (uint64_t row = coreId; row < totalRows_; row += coreCount) {
+                float ignoredMax = NEG_INF;
+                float ignoredSum = 0.0F;
+                ProcessRow(row, ignoredMax, ignoredSum);
+            }
+            return;
+        }
+
+        const uint64_t groupCount = (totalRows_ + AUX_ROWS_PER_GROUP - 1U) /
+                                    AUX_ROWS_PER_GROUP;
+        for (uint64_t group = coreId; group < groupCount; group += coreCount) {
+            const uint64_t rowStart = group * AUX_ROWS_PER_GROUP;
+            const uint32_t rowCount = static_cast<uint32_t>(
+                totalRows_ - rowStart < AUX_ROWS_PER_GROUP
+                    ? totalRows_ - rowStart
+                    : AUX_ROWS_PER_GROUP);
+            for (uint32_t localRow = 0; localRow < rowCount; ++localRow) {
+                float rowMax = NEG_INF;
+                float rowSum = 0.0F;
+                ProcessRow(rowStart + localRow, rowMax, rowSum);
+                auxMax_.SetValue(localRow, rowMax);
+                auxSum_.SetValue(localRow, rowSum);
+            }
+            StoreAuxGroup(rowStart, rowCount);
         }
     }
 
 private:
-    template <typename T>
-    __aicore__ inline void FlushCacheLine(__gm__ T *address) const {
-        AscendC::GlobalTensor<T> line;
-        line.SetGlobalBuffer(address, 1);
-        AscendC::DataCacheCleanAndInvalid<T, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                          AscendC::DcciDst::CACHELINE_OUT>(line);
-    }
-
-    __aicore__ inline void FlushOutputs(uint64_t row, bool writeAux) const {
-        const uint64_t outBase = row * CONTENT_DIM;
-        constexpr uint64_t FLUSH_STRIDE_BYTES = 32;
-        const uint64_t flushStrideElements = primaryIsFloat_ != 0
-            ? FLUSH_STRIDE_BYTES / sizeof(float)
-            : FLUSH_STRIDE_BYTES / sizeof(uint16_t);
-        for (uint64_t d = 0; d < CONTENT_DIM; d += flushStrideElements) {
-            if (primaryIsFloat_ != 0) {
-                FlushCacheLine(attentionOutFloat_ + outBase + d);
-            } else {
-                FlushCacheLine(attentionOutRaw_ + outBase + d);
-            }
-        }
-        if (writeAux) {
-            FlushCacheLine(softmaxMaxOut_ + row);
-            FlushCacheLine(softmaxSumOut_ + row);
+    __aicore__ inline void LoadVector(const AscendC::GlobalTensor<DT_QUERY> &source,
+                                      uint64_t offset, uint32_t count,
+                                      const AscendC::LocalTensor<DT_QUERY> &raw,
+                                      const AscendC::LocalTensor<float> &destination) {
+        // Both the raw input and the converted FP32 tile are reused by the next
+        // sparse token, so complete the previous Vector consumer first.
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0);
+        if constexpr (!std::is_same<DT_QUERY, float>::value) {
+            AscendC::DataCopy(raw, source[offset], count);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
+            AscendC::Cast(destination, raw, AscendC::RoundMode::CAST_NONE, count);
+            AscendC::PipeBarrier<PIPE_V>();
+        } else {
+            AscendC::DataCopy(destination, source[offset], count);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
         }
     }
 
-    __aicore__ inline float Bf16BitsToFloat(uint16_t value) const {
-        union {
-            uint32_t bits;
-            float scalar;
-        } converted;
-        converted.bits = static_cast<uint32_t>(value) << 16;
-        return converted.scalar;
+    __aicore__ inline float Dot(const AscendC::LocalTensor<float> &left,
+                                const AscendC::LocalTensor<float> &right,
+                                uint32_t count) {
+        AscendC::Mul(product_, left, right, count);
+        AscendC::PipeBarrier<PIPE_V>();
+        AscendC::ReduceSum(reduce_, product_, reduceWork_, count);
+        AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+        return reduce_.GetValue(0);
     }
 
-    __aicore__ inline uint16_t FloatToBf16Bits(float value) const {
-        union {
-            float scalar;
-            uint32_t bits;
-        } converted;
-        converted.scalar = value;
-        const uint32_t exponent = converted.bits & 0x7F800000U;
-        const uint32_t mantissa = converted.bits & 0x007FFFFFU;
-        if (exponent == 0x7F800000U && mantissa != 0U) {
-            return static_cast<uint16_t>((converted.bits >> 16) | 0x0040U);
+    __aicore__ inline float ExpNegative(float value) {
+        if (value >= 0.0F) {
+            return 1.0F;
         }
-        const uint32_t roundingBias = 0x00007FFFU + ((converted.bits >> 16) & 1U);
-        return static_cast<uint16_t>((converted.bits + roundingBias) >> 16);
-    }
-
-    __aicore__ inline float ReadQuery(uint64_t offset) const {
-        if (primaryIsFloat_ != 0) {
-            return queryFloat_[offset];
+        if (value <= -80.0F) {
+            return 0.0F;
         }
-        return primaryIsBf16_ != 0 ? Bf16BitsToFloat(queryRaw_[offset])
-                                   : static_cast<float>(queryHalf_[offset]);
-    }
-
-    __aicore__ inline float ReadKey(uint64_t offset) const {
-        if (primaryIsFloat_ != 0) {
-            return keyFloat_[offset];
-        }
-        return primaryIsBf16_ != 0 ? Bf16BitsToFloat(keyRaw_[offset])
-                                   : static_cast<float>(keyHalf_[offset]);
-    }
-
-    __aicore__ inline float ReadValue(uint64_t offset) const {
-        if (primaryIsFloat_ != 0) {
-            return valueFloat_[offset];
-        }
-        return primaryIsBf16_ != 0 ? Bf16BitsToFloat(valueRaw_[offset])
-                                   : static_cast<float>(valueHalf_[offset]);
-    }
-
-    __aicore__ inline float ReadQueryRope(uint64_t offset) const {
-        if (queryRopeIsFloat_ != 0) {
-            return queryRopeFloat_[offset];
-        }
-        if (queryRopeIsBf16_ != 0) {
-            return Bf16BitsToFloat(queryRopeRaw_[offset]);
-        }
-        return static_cast<float>(queryRopeHalf_[offset]);
-    }
-
-    __aicore__ inline float ReadKeyRope(uint64_t offset) const {
-        if (keyRopeIsFloat_ != 0) {
-            return keyRopeFloat_[offset];
-        }
-        if (keyRopeIsBf16_ != 0) {
-            return Bf16BitsToFloat(keyRopeRaw_[offset]);
-        }
-        return static_cast<float>(keyRopeHalf_[offset]);
+        // The Vector exponential is constant-time with respect to |value| and
+        // avoids the scalar baseline's O(n) repeated multiplication loop.
+        AscendC::Duplicate(reduce_, value, static_cast<uint32_t>(AUX_ROWS_PER_GROUP));
+        AscendC::PipeBarrier<PIPE_V>();
+        AscendC::Exp(reduce_, reduce_, static_cast<uint32_t>(AUX_ROWS_PER_GROUP));
+        AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+        return reduce_.GetValue(0);
     }
 
     __aicore__ inline uint64_t ClampLength(int32_t length, uint64_t physicalLength) const {
@@ -189,120 +186,119 @@ private:
         if (hasActualQueryLen_ == 0) {
             return querySeqLen_;
         }
-        return ClampLength(actualQueryLen_[batch], querySeqLen_);
+        return ClampLength(actualQueryLenGm_.GetValue(batch), querySeqLen_);
     }
 
     __aicore__ inline uint64_t GetActualKvLen(uint64_t batch) const {
         if (hasActualKvLen_ == 0) {
             return kvSeqLen_;
         }
-        return ClampLength(actualKvLen_[batch], kvSeqLen_);
+        return ClampLength(actualKvLenGm_.GetValue(batch), kvSeqLen_);
     }
 
-    // Scalar correctness baseline for exp(x), x <= 0. Range reduction keeps the
-    // polynomial on [-ln(2), 0], then applies a power-of-two scale.
-    __aicore__ inline float ExpNegative(float x) const {
-        if (x >= 0.0F) {
-            return 1.0F;
-        }
-        if (x <= -80.0F) {
-            return 0.0F;
-        }
-        const int32_t n = static_cast<int32_t>((-x) * INV_LN2);
-        const float r = x + static_cast<float>(n) * LN2;
-        const float poly = 1.0F + r * (1.0F + r * (0.5F + r * (0.1666666666666667F +
-            r * (0.0416666666666667F + r * (0.0083333333333333F +
-            r * (0.0013888888888889F + r * (0.0001984126984127F +
-            r * 0.0000248015873016F)))))));
-        float scale = 1.0F;
-        for (int32_t i = 0; i < n; ++i) {
-            scale *= 0.5F;
-        }
-        return poly * scale;
-    }
-
-    __aicore__ inline bool PassCausal(uint64_t queryPos, int64_t keyPos,
-                                      uint64_t queryLen, uint64_t kvLen) const {
-        if (sparseMode_ != 3) {
-            return true;
-        }
-        const int64_t limit = static_cast<int64_t>(queryPos) +
-                              static_cast<int64_t>(kvLen) -
-                              static_cast<int64_t>(queryLen);
-        return keyPos <= limit;
-    }
-
-    __aicore__ inline float ComputeScore(uint64_t batch, uint64_t queryPos,
-                                         uint64_t head, uint64_t keyPos) const {
-        const uint64_t queryBase = ((batch * querySeqLen_ + queryPos) * queryHeadNum_ + head) * CONTENT_DIM;
+    __aicore__ inline float ComputeScore(uint64_t batch, uint64_t keyPos) {
         const uint64_t keyBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
-        float dot = 0.0F;
-        for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            dot += ReadQuery(queryBase + d) * ReadKey(keyBase + d);
-        }
+        LoadVector(keyGm_, keyBase, CONTENT_DIM, kvRaw_, kvFp32_);
+        const float contentDot = Dot(queryFp32_, kvFp32_, CONTENT_DIM);
 
-        const uint64_t queryRopeBase = ((batch * querySeqLen_ + queryPos) * queryHeadNum_ + head) * ROPE_DIM;
         const uint64_t keyRopeBase = (batch * kvSeqLen_ + keyPos) * ROPE_DIM;
-        for (uint64_t d = 0; d < ROPE_DIM; ++d) {
-            dot += ReadQueryRope(queryRopeBase + d) * ReadKeyRope(keyRopeBase + d);
-        }
-        return dot * scaleValue_;
+        LoadVector(keyRopeGm_, keyRopeBase, ROPE_DIM, keyRopeRaw_, keyRopeFp32_);
+        const float ropeDot = Dot(queryRopeFp32_, keyRopeFp32_, ROPE_DIM);
+        return (contentDot + ropeDot) * scaleValue_;
     }
 
-    __aicore__ inline void StoreAttention(uint64_t offset, float value) {
-        if (primaryIsFloat_ != 0) {
-            attentionOutFloat_[offset] = value;
-        } else if (primaryIsBf16_ != 0) {
-            attentionOutRaw_[offset] = FloatToBf16Bits(value);
+    __aicore__ inline void AccumulateValue(uint64_t batch, uint64_t keyPos,
+                                           float alpha, float beta, bool first) {
+        const uint64_t valueBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
+        LoadVector(valueGm_, valueBase, CONTENT_DIM, kvRaw_, kvFp32_);
+        if (first) {
+            AscendC::Muls(accumulator_, kvFp32_, beta, CONTENT_DIM);
         } else {
-            attentionOutHalf_[offset] = static_cast<half>(value);
+            AscendC::Muls(accumulator_, accumulator_, alpha, CONTENT_DIM);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Axpy(accumulator_, kvFp32_, beta, CONTENT_DIM);
         }
+        AscendC::PipeBarrier<PIPE_V>();
     }
 
-    __aicore__ inline void StoreZeroOutput(uint64_t row, bool writeAux) {
+    __aicore__ inline void StoreAttention(uint64_t row, float divisor, bool zero) {
+        if (zero) {
+            AscendC::Duplicate(accumulator_, 0.0F, CONTENT_DIM);
+        } else {
+            AscendC::Muls(accumulator_, accumulator_, 1.0F / divisor, CONTENT_DIM);
+        }
+        AscendC::PipeBarrier<PIPE_V>();
+
         const uint64_t outBase = row * CONTENT_DIM;
-        for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            StoreAttention(outBase + d, 0.0F);
+        if constexpr (!std::is_same<DT_QUERY, float>::value) {
+            constexpr AscendC::RoundMode outputRoundMode =
+                std::is_same<DT_QUERY, bfloat16_t>::value
+                    ? AscendC::RoundMode::CAST_RINT
+                    : AscendC::RoundMode::CAST_NONE;
+            AscendC::Cast(outputRaw_, accumulator_, outputRoundMode, CONTENT_DIM);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+            AscendC::DataCopy(attentionOutGm_[outBase], outputRaw_, CONTENT_DIM);
+        } else {
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID0);
+            AscendC::DataCopy(attentionOutGm_[outBase], accumulator_, CONTENT_DIM);
         }
-        if (writeAux) {
-            softmaxMaxOut_[row] = NEG_INF;
-            softmaxSumOut_[row] = 0.0F;
-        }
-        FlushOutputs(row, writeAux);
+        // The same UB buffers are reused by the following row.
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID0);
     }
 
-    __aicore__ inline void ProcessRow(uint64_t row) {
+    __aicore__ inline void StoreAuxGroup(uint64_t rowStart, uint32_t rowCount) {
+        AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(EVENT_ID0);
+        const AscendC::DataCopyExtParams copyParams{
+            1, static_cast<uint32_t>(rowCount * sizeof(float)), 0, 0, 0};
+        AscendC::DataCopyPad(softmaxMaxOutGm_[rowStart], auxMax_, copyParams);
+        AscendC::DataCopyPad(softmaxSumOutGm_[rowStart], auxSum_, copyParams);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(EVENT_ID0);
+    }
+
+    __aicore__ inline void ProcessRow(uint64_t row, float &rowMax, float &rowSum) {
         const uint64_t head = row % queryHeadNum_;
         const uint64_t queryRow = row / queryHeadNum_;
         const uint64_t queryPos = queryRow % querySeqLen_;
         const uint64_t batch = queryRow / querySeqLen_;
-        const bool writeAux = returnSoftmaxLse_ != 0;
 
         const uint64_t actualQueryLen = GetActualQueryLen(batch);
         const uint64_t actualKvLen = GetActualKvLen(batch);
         if (queryPos >= actualQueryLen || actualKvLen == 0) {
-            StoreZeroOutput(row, writeAux);
+            StoreAttention(row, 1.0F, true);
+            rowMax = NEG_INF;
+            rowSum = 0.0F;
             return;
         }
 
-        for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            accumulator_.SetValue(d, 0.0F);
-        }
+        const uint64_t queryBase =
+            ((batch * querySeqLen_ + queryPos) * queryHeadNum_ + head) * CONTENT_DIM;
+        const uint64_t queryRopeBase =
+            ((batch * querySeqLen_ + queryPos) * queryHeadNum_ + head) * ROPE_DIM;
+        LoadVector(queryGm_, queryBase, CONTENT_DIM, queryRaw_, queryFp32_);
+        LoadVector(queryRopeGm_, queryRopeBase, ROPE_DIM, queryRopeRaw_, queryRopeFp32_);
 
+        const int64_t causalLimit = sparseMode_ == 3
+            ? static_cast<int64_t>(queryPos) + static_cast<int64_t>(actualKvLen) -
+                  static_cast<int64_t>(actualQueryLen)
+            : static_cast<int64_t>(actualKvLen - 1U);
         const uint64_t indexBase = (batch * querySeqLen_ + queryPos) * sparseSize_;
         bool hasValue = false;
         float runningMax = NEG_INF;
         float runningSum = 0.0F;
 
-        // sparseSize_ is the number of selected sparse blocks. For
-        // sparseBlockSize_ == 1 each sparse index is exactly one KV token.
-        // For block-wise sparse attention, each index identifies a contiguous
-        // block and is expanded to sparseBlockSize_ KV tokens before applying
-        // actual-length and causal masking token by token.
-        for (uint64_t k = 0; k < sparseSize_; ++k) {
-            const int64_t sparseBlockIndex = static_cast<int64_t>(sparseIndices_[indexBase + k]);
+        for (uint64_t sparseOffset = 0; sparseOffset < sparseSize_; ++sparseOffset) {
+            const int64_t sparseBlockIndex = static_cast<int64_t>(
+                sparseIndicesGm_.GetValue(indexBase + sparseOffset));
+            // The contract's invalid entries form a suffix, so no later entry
+            // can become valid after the first negative sentinel.
             if (sparseBlockIndex < 0) {
-                continue;
+                break;
             }
 
             const uint64_t blockStart = static_cast<uint64_t>(sparseBlockIndex) *
@@ -311,26 +307,25 @@ private:
                 continue;
             }
 
+            // Each content/RoPE/value row is a contiguous GM burst. Expanding
+            // a block here preserves online-softmax order without materializing
+            // a block-sized K/V tile in UB.
             for (uint64_t blockOffset = 0; blockOffset < sparseBlockSize_; ++blockOffset) {
                 const uint64_t keyPos = blockStart + blockOffset;
                 if (keyPos >= actualKvLen) {
                     break;
                 }
-                if (!PassCausal(queryPos, static_cast<int64_t>(keyPos),
-                                actualQueryLen, actualKvLen)) {
+                if (static_cast<int64_t>(keyPos) > causalLimit) {
                     continue;
                 }
 
-                const float score = ComputeScore(batch, queryPos, head, keyPos);
-
+                const float score = ComputeScore(batch, keyPos);
                 float alpha = 0.0F;
                 float beta = 1.0F;
                 float newMax = score;
                 if (hasValue) {
                     if (score > runningMax) {
                         alpha = ExpNegative(runningMax - score);
-                        beta = 1.0F;
-                        newMax = score;
                     } else {
                         alpha = 1.0F;
                         beta = ExpNegative(score - runningMax);
@@ -338,12 +333,7 @@ private:
                     }
                 }
                 const float newSum = runningSum * alpha + beta;
-                const uint64_t valueBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
-                for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-                    const float oldAcc = accumulator_.GetValue(d);
-                    accumulator_.SetValue(d, oldAcc * alpha + beta * ReadValue(valueBase + d));
-                }
-
+                AccumulateValue(batch, keyPos, alpha, beta, !hasValue);
                 runningMax = newMax;
                 runningSum = newSum;
                 hasValue = true;
@@ -351,49 +341,62 @@ private:
         }
 
         if (!hasValue || runningSum <= 0.0F) {
-            StoreZeroOutput(row, writeAux);
+            StoreAttention(row, 1.0F, true);
+            rowMax = NEG_INF;
+            rowSum = 0.0F;
             return;
         }
 
-        const float invSum = 1.0F / runningSum;
-        const uint64_t outBase = row * CONTENT_DIM;
-        for (uint64_t d = 0; d < CONTENT_DIM; ++d) {
-            StoreAttention(outBase + d, accumulator_.GetValue(d) * invSum);
-        }
-        if (writeAux) {
-            softmaxMaxOut_[row] = runningMax;
-            softmaxSumOut_[row] = runningSum;
-        }
-        FlushOutputs(row, writeAux);
+        StoreAttention(row, runningSum, false);
+        rowMax = runningMax;
+        rowSum = runningSum;
     }
 
 private:
-    __gm__ half *queryHalf_;
-    __gm__ uint16_t *queryRaw_;
-    __gm__ float *queryFloat_;
-    __gm__ half *keyHalf_;
-    __gm__ uint16_t *keyRaw_;
-    __gm__ float *keyFloat_;
-    __gm__ half *valueHalf_;
-    __gm__ uint16_t *valueRaw_;
-    __gm__ float *valueFloat_;
-    __gm__ int32_t *sparseIndices_;
-    __gm__ int32_t *actualQueryLen_;
-    __gm__ int32_t *actualKvLen_;
-    __gm__ half *queryRopeHalf_;
-    __gm__ uint16_t *queryRopeRaw_;
-    __gm__ float *queryRopeFloat_;
-    __gm__ half *keyRopeHalf_;
-    __gm__ uint16_t *keyRopeRaw_;
-    __gm__ float *keyRopeFloat_;
-    __gm__ half *attentionOutHalf_;
-    __gm__ uint16_t *attentionOutRaw_;
-    __gm__ float *attentionOutFloat_;
-    __gm__ float *softmaxMaxOut_;
-    __gm__ float *softmaxSumOut_;
+    AscendC::GlobalTensor<DT_QUERY> queryGm_;
+    AscendC::GlobalTensor<DT_QUERY> keyGm_;
+    AscendC::GlobalTensor<DT_QUERY> valueGm_;
+    AscendC::GlobalTensor<int32_t> sparseIndicesGm_;
+    AscendC::GlobalTensor<int32_t> actualQueryLenGm_;
+    AscendC::GlobalTensor<int32_t> actualKvLenGm_;
+    AscendC::GlobalTensor<DT_QUERY> queryRopeGm_;
+    AscendC::GlobalTensor<DT_QUERY> keyRopeGm_;
+    AscendC::GlobalTensor<DT_QUERY> attentionOutGm_;
+    AscendC::GlobalTensor<float> softmaxMaxOutGm_;
+    AscendC::GlobalTensor<float> softmaxSumOutGm_;
+
     AscendC::TPipe pipe_;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> accBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> queryRawBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> queryFp32Buf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> queryRopeRawBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> queryRopeFp32Buf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> kvRawBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> kvFp32Buf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> keyRopeRawBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> keyRopeFp32Buf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> accumulatorBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> productBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> reduceBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> reduceWorkBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> outputRawBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> auxMaxBuf_;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> auxSumBuf_;
+
+    AscendC::LocalTensor<DT_QUERY> queryRaw_;
+    AscendC::LocalTensor<float> queryFp32_;
+    AscendC::LocalTensor<DT_QUERY> queryRopeRaw_;
+    AscendC::LocalTensor<float> queryRopeFp32_;
+    AscendC::LocalTensor<DT_QUERY> kvRaw_;
+    AscendC::LocalTensor<float> kvFp32_;
+    AscendC::LocalTensor<DT_QUERY> keyRopeRaw_;
+    AscendC::LocalTensor<float> keyRopeFp32_;
     AscendC::LocalTensor<float> accumulator_;
+    AscendC::LocalTensor<float> product_;
+    AscendC::LocalTensor<float> reduce_;
+    AscendC::LocalTensor<float> reduceWork_;
+    AscendC::LocalTensor<DT_QUERY> outputRaw_;
+    AscendC::LocalTensor<float> auxMax_;
+    AscendC::LocalTensor<float> auxSum_;
 
     uint64_t batchSize_;
     uint64_t querySeqLen_;
@@ -401,12 +404,6 @@ private:
     uint64_t queryHeadNum_;
     uint64_t sparseSize_;
     uint64_t totalRows_;
-    uint32_t primaryIsBf16_;
-    uint32_t primaryIsFloat_;
-    uint32_t queryRopeIsBf16_;
-    uint32_t queryRopeIsFloat_;
-    uint32_t keyRopeIsBf16_;
-    uint32_t keyRopeIsFloat_;
     uint32_t hasActualQueryLen_;
     uint32_t hasActualKvLen_;
     uint32_t sparseBlockSize_;

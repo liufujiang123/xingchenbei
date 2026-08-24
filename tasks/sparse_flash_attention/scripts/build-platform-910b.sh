@@ -40,7 +40,7 @@ cmake --build "${build_dir}" --parallel "${SPARSE_FLASH_ATTENTION_BUILD_JOBS:-2}
 [[ -f "${build_dir}/libcust_opapi.so" ]] || fail "ACLNN library is missing"
 [[ -f "${build_dir}/op_host/libcustom_ascendc_cust_optiling.so" ]] || fail "Host tiling library is missing"
 mapfile -t kernel_objects < <(find "${build_dir}/op_kernel/ascendc_kernels/binary/ascend910b" -type f -name 'SparseFlashAttention_*.o' -print 2>/dev/null)
-[[ ${#kernel_objects[@]} -eq 2 ]] || fail "expected two official dtype binaries, found ${#kernel_objects[@]}"
+[[ ${#kernel_objects[@]} -eq 3 ]] || fail "expected FP16, FP32, and BF16 binaries, found ${#kernel_objects[@]}"
 echo "HOST_BUILD=PASS"
 echo "KERNEL_BINARY_COUNT=${#kernel_objects[@]}"
 echo "SPARSE_FLASH_ATTENTION_PLATFORM_910B_BUILD_PASS"

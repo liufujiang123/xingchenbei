@@ -55,6 +55,20 @@ class AclRuntime:
         self.lib.aclrtDestroyStream.restype = ctypes.c_int
         self.lib.aclrtSynchronizeStream.argtypes = [ctypes.c_void_p]
         self.lib.aclrtSynchronizeStream.restype = ctypes.c_int
+        self.lib.aclrtCreateEvent.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+        self.lib.aclrtCreateEvent.restype = ctypes.c_int
+        self.lib.aclrtDestroyEvent.argtypes = [ctypes.c_void_p]
+        self.lib.aclrtDestroyEvent.restype = ctypes.c_int
+        self.lib.aclrtRecordEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        self.lib.aclrtRecordEvent.restype = ctypes.c_int
+        self.lib.aclrtSynchronizeEvent.argtypes = [ctypes.c_void_p]
+        self.lib.aclrtSynchronizeEvent.restype = ctypes.c_int
+        self.lib.aclrtEventElapsedTime.argtypes = [
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        ]
+        self.lib.aclrtEventElapsedTime.restype = ctypes.c_int
         self.lib.aclrtMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t, ctypes.c_int]
         self.lib.aclrtMalloc.restype = ctypes.c_int
         self.lib.aclrtFree.argtypes = [ctypes.c_void_p]
@@ -324,6 +338,13 @@ def build_cases() -> list[Case]:
             return_aux=False,
         ),
         make_case("H_fp32", [[0, 1, 3], [2, 3, 1]], kvs=4, dtype=fp32),
+        make_case(
+            "I_bf16",
+            [[0, 1, 3], [2, 3, 1]],
+            kvs=4,
+            dtype=fp32,
+            bf16=True,
+        ),
     ]
 
 
@@ -394,7 +415,7 @@ def build_workspace_cases() -> list[Case]:
     def add(name: str, **overrides: object) -> None:
         cases.append(make_workspace_case(name, **overrides))
 
-    for dtype_name in ("float16", "float32"):
+    for dtype_name in ("float16", "float32", "bfloat16"):
         add(f"dtype_{dtype_name}", dtype_name=dtype_name)
     for b in (1, 2):
         add(f"batch_{b}", b=b)
@@ -420,8 +441,8 @@ def build_workspace_cases() -> list[Case]:
     for return_aux in (False, True):
         add(f"return_lse_{str(return_aux).lower()}", return_aux=return_aux)
     # OpDef dtype/format lists are index-paired. The generated simplified keys
-    # therefore admit exactly these two official same-dtype combinations.
-    for dtype_name in ("float16", "float32"):
+    # therefore admit exactly these three same-dtype combinations.
+    for dtype_name in ("float16", "float32", "bfloat16"):
         add(f"rope_{dtype_name}_{dtype_name}", dtype_name=dtype_name,
             rope_dtype_name=dtype_name)
     return cases
@@ -511,6 +532,7 @@ class SparseFlashAttentionAclnn:
             ctypes.c_void_p,
         ]
         self.custom.aclnnSparseFlashAttention.restype = ctypes.c_int
+        self.last_device_ms: float | None = None
 
     def _tensor(self, array: DeviceArray) -> ctypes.c_void_p:
         shape = tuple(array.host.shape)
@@ -568,6 +590,8 @@ class SparseFlashAttentionAclnn:
         all_arrays += [x for x in (max_output, sum_output) if x is not None]
         handles: list[ctypes.c_void_p] = []
         workspace = None
+        start_event = ctypes.c_void_p()
+        end_event = ctypes.c_void_p()
         try:
             input_handles = [self._tensor(value) for value in input_arrays]
             handles.extend(input_handles)
@@ -611,6 +635,18 @@ class SparseFlashAttentionAclnn:
             if workspace_size.value:
                 workspace = self.runtime.malloc(workspace_size.value)
                 workspace_pointer = workspace
+            self.runtime._check(
+                self.runtime.lib.aclrtCreateEvent(ctypes.byref(start_event)),
+                "aclrtCreateEvent(start)",
+            )
+            self.runtime._check(
+                self.runtime.lib.aclrtCreateEvent(ctypes.byref(end_event)),
+                "aclrtCreateEvent(end)",
+            )
+            self.runtime._check(
+                self.runtime.lib.aclrtRecordEvent(start_event, self.runtime.stream),
+                "aclrtRecordEvent(start)",
+            )
             status = self.custom.aclnnSparseFlashAttention(
                 workspace_pointer,
                 workspace_size.value,
@@ -620,15 +656,31 @@ class SparseFlashAttentionAclnn:
             if status != ACL_SUCCESS:
                 raise RuntimeError(f"aclnnSparseFlashAttention failed: {status}")
             self.runtime._check(
-                self.runtime.lib.aclrtSynchronizeStream(self.runtime.stream),
-                "aclrtSynchronizeStream",
+                self.runtime.lib.aclrtRecordEvent(end_event, self.runtime.stream),
+                "aclrtRecordEvent(end)",
             )
+            self.runtime._check(
+                self.runtime.lib.aclrtSynchronizeEvent(end_event),
+                "aclrtSynchronizeEvent(end)",
+            )
+            elapsed_ms = ctypes.c_float()
+            self.runtime._check(
+                self.runtime.lib.aclrtEventElapsedTime(
+                    ctypes.byref(elapsed_ms), start_event, end_event
+                ),
+                "aclrtEventElapsedTime",
+            )
+            self.last_device_ms = float(elapsed_ms.value)
             return (
                 attention.fetch(),
                 None if max_output is None else max_output.fetch(),
                 None if sum_output is None else sum_output.fetch(),
             )
         finally:
+            if end_event.value:
+                self.runtime.lib.aclrtDestroyEvent(end_event)
+            if start_event.value:
+                self.runtime.lib.aclrtDestroyEvent(start_event)
             if workspace is not None:
                 self.runtime.free(workspace)
             for handle in handles:
