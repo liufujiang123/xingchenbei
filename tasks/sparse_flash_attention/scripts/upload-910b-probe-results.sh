@@ -33,7 +33,16 @@ cp "${archive}" "${result_repo}/sfa-910b-probe-results.tar.gz"
 } >"${result_repo}/metadata.txt"
 git -C "${result_repo}" add sfa-910b-probe-results.tar.gz metadata.txt
 git -C "${result_repo}" commit -q -m "test: upload SFA 910B probe result ${timestamp}"
-git -C "${result_repo}" push origin "HEAD:refs/heads/${result_branch}"
+push_ok=0
+for attempt in 1 2 3; do
+    if git -C "${result_repo}" -c http.version=HTTP/1.1 \
+        push origin "HEAD:refs/heads/${result_branch}"; then
+        push_ok=1
+        break
+    fi
+    echo "SFA_910B_RESULT_UPLOAD_RETRY=${attempt}" >&2
+done
+[[ ${push_ok} -eq 1 ]] || fail "GitHub result push failed after three HTTP/1.1 attempts"
 
 echo "RESULT_PUSH_BRANCH=${result_branch}"
 echo "RESULT_PUSH=PASS"

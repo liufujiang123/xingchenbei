@@ -29,8 +29,19 @@ run_variant() {
     local build_dir="${variant_root}/build"
     mkdir -p "${variant_source}" "${build_dir}"
     cp -a "${source_dir}/." "${variant_source}/"
-    if [[ "${variant}" == "minimal_host_control" ]]; then
+    if [[ "${variant}" == "minimal_host_control" || "${variant}" == "official_opdef_control" ]]; then
         cp "${fixture}" "${variant_source}/op_host/sparse_flash_attention.cpp"
+    fi
+    if [[ "${variant}" == "official_opdef_control" ]]; then
+        # The verified official 303 OpDef declares FP16/FP32 pairs. Keep the
+        # diagnostic Host minimal while restoring that exact public support
+        # list; the FP16 control case does not need BF16 to reach tiling.
+        sed -i \
+            -e 's/{ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16}/{ge::DT_FLOAT16, ge::DT_FLOAT}/g' \
+            -e 's/{ge::DT_INT32, ge::DT_INT32, ge::DT_INT32}/{ge::DT_INT32, ge::DT_INT32}/g' \
+            -e 's/{ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT}/{ge::DT_FLOAT, ge::DT_FLOAT}/g' \
+            -e 's/{ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND}/{ge::FORMAT_ND, ge::FORMAT_ND}/g' \
+            "${variant_source}/op_host/sparse_flash_attention.cpp"
     fi
     local build_log="${run_root}/logs/${variant}-build.log"
     echo "TILING_CONTROL_VARIANT=${variant}"
@@ -59,6 +70,7 @@ run_variant() {
     fi
 }
 
+run_variant official_opdef_control
 run_variant minimal_host_control
 run_variant production_host
 
