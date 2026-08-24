@@ -444,6 +444,7 @@ def build_cases() -> list[Case]:
             return_aux=True,
         ),
         make_content_only_single_index_case(),
+        make_random_independent_case(wide=False),
     ]
 
 

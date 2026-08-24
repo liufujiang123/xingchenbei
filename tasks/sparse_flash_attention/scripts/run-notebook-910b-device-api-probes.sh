@@ -9,6 +9,7 @@ script_dir=$(dirname "${script_path}")
 task_dir=$(cd "${script_dir}/.." && pwd)
 source_dir="${task_dir}/workspace/code"
 test_file="${task_dir}/tests/test_sparse_flash_attention.py"
+old_scalar_fixture="${task_dir}/tests/fixtures/sparse_flash_attention_scalar_1594f68.cpp"
 device_id=${SPARSE_FLASH_ATTENTION_DEVICE_ID:-0}
 
 fail() { echo "SFA_910B_DEVICE_API_PROBE_FAIL: $*" >&2; exit 1; }
@@ -42,6 +43,12 @@ cases=(
     D_rope_required_fp32
     A_basic
 )
+if [[ -n "${SFA_910B_DEVICE_API_VARIANTS:-}" ]]; then
+    read -r -a variants <<<"${SFA_910B_DEVICE_API_VARIANTS}"
+fi
+if [[ -n "${SFA_910B_DEVICE_API_CASES:-}" ]]; then
+    read -r -a cases <<<"${SFA_910B_DEVICE_API_CASES}"
+fi
 printf 'variant\tpackage\tinstall\tcase\trun\n' >"${run_root}/results/summary.tsv"
 
 apply_variant() {
@@ -74,6 +81,26 @@ apply_variant() {
                 -e 's/ROPE_DOT_EXPERIMENT = RopeDotExperiment::VECTOR_REDUCE/ROPE_DOT_EXPERIMENT = RopeDotExperiment::SCALAR_UB/' \
                 -e 's/EXP_EXPERIMENT = ExpExperiment::VECTOR/EXP_EXPERIMENT = ExpExperiment::SCALAR_POLYNOMIAL/' \
                 "${kernel}"
+            ;;
+        content_scalar)
+            sed -i \
+                's/ContentDotExperiment::VECTOR_REDUCE;/ContentDotExperiment::SCALAR_UB;/' \
+                "${kernel}"
+            ;;
+        value_scalar)
+            sed -i \
+                's/ValueAccumulationExperiment::VECTOR_MULS_AXPY;/ValueAccumulationExperiment::SCALAR_UB;/' \
+                "${kernel}"
+            ;;
+        content_value_scalar)
+            sed -i \
+                -e 's/ContentDotExperiment::VECTOR_REDUCE;/ContentDotExperiment::SCALAR_UB;/' \
+                -e 's/ValueAccumulationExperiment::VECTOR_MULS_AXPY;/ValueAccumulationExperiment::SCALAR_UB;/' \
+                "${kernel}"
+            ;;
+        old_scalar)
+            [[ -r "${old_scalar_fixture}" ]] || fail "missing old scalar fixture"
+            cp "${old_scalar_fixture}" "${kernel}"
             ;;
         *) fail "unknown variant: ${variant}" ;;
     esac

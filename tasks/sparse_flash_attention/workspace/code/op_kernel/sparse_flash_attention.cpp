@@ -38,6 +38,14 @@ enum class DotResultExperiment : uint32_t {
     LOCAL_TENSOR = 0,
     ACCUMULATOR_REGISTER = 1,
 };
+enum class ContentDotExperiment : uint32_t {
+    VECTOR_REDUCE = 0,
+    SCALAR_UB = 1,
+};
+enum class ValueAccumulationExperiment : uint32_t {
+    VECTOR_MULS_AXPY = 0,
+    SCALAR_UB = 1,
+};
 
 constexpr bool AGGREGATE_KEY_INSTEAD_OF_VALUE = false;
 constexpr ScaleExperiment SCALE_EXPERIMENT = ScaleExperiment::ATTRIBUTE;
@@ -53,6 +61,9 @@ constexpr ExpExperiment EXP_EXPERIMENT = ExpExperiment::VECTOR;
 constexpr BufferPositionExperiment BUFFER_POSITION_EXPERIMENT =
     BufferPositionExperiment::LEGACY_VECCALC;
 constexpr DotResultExperiment DOT_RESULT_EXPERIMENT = DotResultExperiment::LOCAL_TENSOR;
+constexpr ContentDotExperiment CONTENT_DOT_EXPERIMENT = ContentDotExperiment::VECTOR_REDUCE;
+constexpr ValueAccumulationExperiment VALUE_ACCUMULATION_EXPERIMENT =
+    ValueAccumulationExperiment::VECTOR_MULS_AXPY;
 
 constexpr AscendC::TPosition INPUT_BUFFER_POSITION =
     BUFFER_POSITION_EXPERIMENT == BufferPositionExperiment::STANDARD_VECIN_VECOUT
@@ -304,7 +315,12 @@ private:
     __aicore__ inline float ComputeScore(uint64_t batch, uint64_t keyPos) {
         const uint64_t keyBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
         LoadVector(keyGm_, keyBase, CONTENT_DIM, kvRaw_, kvFp32_);
-        const float contentDot = Dot(queryFp32_, kvFp32_, CONTENT_DIM);
+        float contentDot = 0.0F;
+        if constexpr (CONTENT_DOT_EXPERIMENT == ContentDotExperiment::SCALAR_UB) {
+            contentDot = DotScalarUb(queryFp32_, kvFp32_, CONTENT_DIM);
+        } else {
+            contentDot = Dot(queryFp32_, kvFp32_, CONTENT_DIM);
+        }
 
         float ropeDot = 0.0F;
         if constexpr (!DISABLE_ROPE_TERM) {
@@ -330,7 +346,17 @@ private:
         } else {
             LoadVector(valueGm_, valueBase, CONTENT_DIM, kvRaw_, kvFp32_);
         }
-        if (first) {
+        if constexpr (VALUE_ACCUMULATION_EXPERIMENT ==
+                      ValueAccumulationExperiment::SCALAR_UB) {
+            AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+            AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+            for (uint32_t d = 0; d < CONTENT_DIM; ++d) {
+                const float oldValue = first ? 0.0F : accumulator_.GetValue(d) * alpha;
+                accumulator_.SetValue(d, oldValue + beta * kvFp32_.GetValue(d));
+            }
+            AscendC::SetFlag<AscendC::HardEvent::S_V>(EVENT_ID0);
+            AscendC::WaitFlag<AscendC::HardEvent::S_V>(EVENT_ID0);
+        } else if (first) {
             AscendC::Muls(accumulator_, kvFp32_, beta, CONTENT_DIM);
         } else {
             AscendC::Muls(accumulator_, accumulator_, alpha, CONTENT_DIM);
