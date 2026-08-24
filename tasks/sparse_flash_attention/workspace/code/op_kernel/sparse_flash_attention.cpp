@@ -22,6 +22,14 @@ enum class CausalExperiment : uint32_t {
     ORDINARY = 1,
     RIGHT_DOWN_PHYSICAL = 2,
 };
+enum class RopeDotExperiment : uint32_t {
+    VECTOR_REDUCE = 0,
+    SCALAR_UB = 1,
+};
+enum class ExpExperiment : uint32_t {
+    VECTOR = 0,
+    SCALAR_POLYNOMIAL = 1,
+};
 
 constexpr bool AGGREGATE_KEY_INSTEAD_OF_VALUE = false;
 constexpr ScaleExperiment SCALE_EXPERIMENT = ScaleExperiment::ATTRIBUTE;
@@ -30,6 +38,10 @@ constexpr CausalExperiment CAUSAL_EXPERIMENT = CausalExperiment::RIGHT_DOWN_ACTU
 constexpr bool SPARSE_INDEX_IS_TOKEN_START = false;
 constexpr bool DISABLE_ROPE_TERM = false;
 constexpr bool TWO_PASS_SOFTMAX = false;
+// Diagnostic-only switches used by the isolated 910B probe branch. They do
+// not alter the public operator interface or the required mathematics.
+constexpr RopeDotExperiment ROPE_DOT_EXPERIMENT = RopeDotExperiment::VECTOR_REDUCE;
+constexpr ExpExperiment EXP_EXPERIMENT = ExpExperiment::VECTOR;
 }  // namespace
 
 template <class DT_QUERY>
@@ -185,6 +197,21 @@ private:
         return reduce_.GetValue(0);
     }
 
+    __aicore__ inline float DotScalarUb(const AscendC::LocalTensor<float> &left,
+                                        const AscendC::LocalTensor<float> &right,
+                                        uint32_t count) {
+        // LoadVector finishes with Vector work. Synchronize before reading the
+        // converted UB values from the scalar pipe, then reproduce the old
+        // left-to-right FP32 accumulation order without ReduceSum.
+        AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+        float result = 0.0F;
+        for (uint32_t index = 0; index < count; ++index) {
+            result += left.GetValue(index) * right.GetValue(index);
+        }
+        return result;
+    }
+
     __aicore__ inline float ExpNegative(float value) {
         if (value >= 0.0F) {
             return 1.0F;
@@ -192,14 +219,30 @@ private:
         if (value <= -80.0F) {
             return 0.0F;
         }
-        // The Vector exponential is constant-time with respect to |value| and
-        // avoids the scalar baseline's O(n) repeated multiplication loop.
-        AscendC::Duplicate(reduce_, value, static_cast<uint32_t>(AUX_ROWS_PER_GROUP));
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Exp(reduce_, reduce_, static_cast<uint32_t>(AUX_ROWS_PER_GROUP));
-        AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
-        AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
-        return reduce_.GetValue(0);
+        if constexpr (EXP_EXPERIMENT == ExpExperiment::SCALAR_POLYNOMIAL) {
+            constexpr float ln2 = 0.6931471805599453F;
+            constexpr float invLn2 = 1.4426950408889634F;
+            const int32_t exponent = static_cast<int32_t>((-value) * invLn2);
+            const float reduced = value + static_cast<float>(exponent) * ln2;
+            const float polynomial = 1.0F + reduced * (1.0F + reduced *
+                (0.5F + reduced * (0.1666666666666667F + reduced *
+                (0.0416666666666667F + reduced * (0.0083333333333333F + reduced *
+                (0.0013888888888889F + reduced * (0.0001984126984127F +
+                reduced * 0.0000248015873016F)))))));
+            float scale = 1.0F;
+            for (int32_t index = 0; index < exponent; ++index) {
+                scale *= 0.5F;
+            }
+            return polynomial * scale;
+        } else {
+            // The Vector exponential is constant-time with respect to |value|.
+            AscendC::Duplicate(reduce_, value, static_cast<uint32_t>(AUX_ROWS_PER_GROUP));
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Exp(reduce_, reduce_, static_cast<uint32_t>(AUX_ROWS_PER_GROUP));
+            AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+            AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID0);
+            return reduce_.GetValue(0);
+        }
     }
 
     __aicore__ inline uint64_t ClampLength(int32_t length, uint64_t physicalLength) const {
@@ -233,7 +276,11 @@ private:
         if constexpr (!DISABLE_ROPE_TERM) {
             const uint64_t keyRopeBase = (batch * kvSeqLen_ + keyPos) * ROPE_DIM;
             LoadVector(keyRopeGm_, keyRopeBase, ROPE_DIM, keyRopeRaw_, keyRopeFp32_);
-            ropeDot = Dot(queryRopeFp32_, keyRopeFp32_, ROPE_DIM);
+            if constexpr (ROPE_DOT_EXPERIMENT == RopeDotExperiment::SCALAR_UB) {
+                ropeDot = DotScalarUb(queryRopeFp32_, keyRopeFp32_, ROPE_DIM);
+            } else {
+                ropeDot = Dot(queryRopeFp32_, keyRopeFp32_, ROPE_DIM);
+            }
         }
         if constexpr (ROPE_TERM_UNSCALED) {
             return contentDot * scaleValue_ + ropeDot;

@@ -313,6 +313,21 @@ def build_cases() -> list[Case]:
         make_case("B_shared_kv_heads", [[0, 2, 3], [1, 3, 0]], kvs=4, qn=2, dtype=fp16),
         make_case("C_invalid_suffix", [[0, 2, -1], [3, 9, -1]], kvs=4, dtype=fp16),
         make_case("D_rope_required", [[0, 1, 2], [1, 2, 3]], kvs=4, dtype=fp16, rope_only=True),
+        make_case(
+            "D_rope_required_fp32",
+            [[0, 1, 2], [1, 2, 3]],
+            kvs=4,
+            dtype=fp32,
+            rope_only=True,
+        ),
+        make_case(
+            "D_rope_required_bf16",
+            [[0, 1, 2], [1, 2, 3]],
+            kvs=4,
+            dtype=fp32,
+            rope_only=True,
+            bf16=True,
+        ),
         make_case("E_actual_query", [[0, 1], [1, 2], [2, 3]], kvs=4, dtype=fp16, actual_query=2),
         make_case("E_actual_kv", [[0, 4, -1], [2, 3, 4]], kvs=5, dtype=fp16, actual_kv=3),
         make_case(
