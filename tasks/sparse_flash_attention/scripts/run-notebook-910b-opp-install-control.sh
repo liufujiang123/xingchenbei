@@ -15,8 +15,9 @@ mode=${SFA_910B_OPP_INSTALL_MODE:-control}
 fail() { echo "SFA_910B_OPP_INSTALL_CONTROL_FAIL: $*" >&2; exit 1; }
 [[ -n "${ASCEND_HOME_PATH:-}" && -d "${ASCEND_HOME_PATH}" ]] || fail "ASCEND_HOME_PATH is invalid"
 [[ -r "${fixture}" ]] || fail "missing minimal Host fixture"
-[[ "${mode}" == "control" || "${mode}" == "production_smoke" ]] || \
-    fail "SFA_910B_OPP_INSTALL_MODE must be control or production_smoke"
+[[ "${mode}" == "control" || "${mode}" == "production_smoke" || \
+   "${mode}" == "production_all" ]] || \
+    fail "SFA_910B_OPP_INSTALL_MODE must be control, production_smoke, or production_all"
 
 run_root=${SFA_910B_OPP_INSTALL_CONTROL_ROOT:-"${TMPDIR:-/tmp}/sfa-910b-opp-install-control"}
 if [[ -e "${run_root}" ]]; then
@@ -84,6 +85,12 @@ else
                 if [[ "${mode}" == "control" ]]; then
                     test_args=(D_rope_required --workspace-only --device "${device_id}")
                     result_stage=get_workspace
+                elif [[ "${mode}" == "production_all" ]]; then
+                    # The test's explicit "all" set covers the current
+                    # FP16/FP32/BF16, GQA, sparse, causal, optional-output,
+                    # and actual-length correctness cases on the installed OPP.
+                    test_args=(all --device "${device_id}")
+                    result_stage=kernel_matrix
                 fi
                 # Do not preload or explicitly load a tiling .so here.  The
                 # installed OPP and ASCEND_CUSTOM_OPP_PATH must resolve it.
