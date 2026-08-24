@@ -41,11 +41,15 @@ sed -i \
     "${run_root}/source/op_host/sparse_flash_attention.cpp"
 
 build_log="${run_root}/logs/build-and-package.log"
+# CANN 8.5's RUN package does not make the per-SOC binary target a default
+# dependency. CPack requires its output directory, so build it explicitly.
 if ! cmake -S "${run_root}/source" -B "${run_root}/build" \
         -DASCEND_CANN_PACKAGE_PATH="$(readlink -f "${ASCEND_HOME_PATH}")" \
         >"${build_log}" 2>&1 || \
    ! cmake --build "${run_root}/build" --parallel "${SFA_910B_BUILD_JOBS:-2}" \
         >>"${build_log}" 2>&1 || \
+   ! cmake --build "${run_root}/build" --target SparseFlashAttention_ascend910b \
+        --parallel "${SFA_910B_BUILD_JOBS:-2}" >>"${build_log}" 2>&1 || \
    ! cpack --config "${run_root}/build/CPackConfig.cmake" >>"${build_log}" 2>&1; then
     printf 'stage\tstatus\npackage\tFAIL\n' >"${run_root}/results/summary.tsv"
 else
