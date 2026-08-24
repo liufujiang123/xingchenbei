@@ -10,10 +10,13 @@ source_dir="${task_dir}/workspace/code"
 fixture="${task_dir}/tests/fixtures/sparse_flash_attention_minimal_host.cpp"
 test_file="${task_dir}/tests/test_sparse_flash_attention.py"
 device_id=${SPARSE_FLASH_ATTENTION_DEVICE_ID:-0}
+mode=${SFA_910B_OPP_INSTALL_MODE:-control}
 
 fail() { echo "SFA_910B_OPP_INSTALL_CONTROL_FAIL: $*" >&2; exit 1; }
 [[ -n "${ASCEND_HOME_PATH:-}" && -d "${ASCEND_HOME_PATH}" ]] || fail "ASCEND_HOME_PATH is invalid"
 [[ -r "${fixture}" ]] || fail "missing minimal Host fixture"
+[[ "${mode}" == "control" || "${mode}" == "production_smoke" ]] || \
+    fail "SFA_910B_OPP_INSTALL_MODE must be control or production_smoke"
 
 run_root=${SFA_910B_OPP_INSTALL_CONTROL_ROOT:-"${TMPDIR:-/tmp}/sfa-910b-opp-install-control"}
 if [[ -e "${run_root}" ]]; then
@@ -26,19 +29,24 @@ mkdir -p "${run_root}/source" "${run_root}/build" "${run_root}/install" \
     "${run_root}/logs" "${run_root}/results"
 
 cp -a "${source_dir}/." "${run_root}/source/"
-cp "${fixture}" "${run_root}/source/op_host/sparse_flash_attention.cpp"
+if [[ "${mode}" == "control" ]]; then
+    cp "${fixture}" "${run_root}/source/op_host/sparse_flash_attention.cpp"
+fi
 
-# RUN is deliberately applied only to this copied test project.  The official
-# FP16/FP32 support list removes the unrelated BF16 extension from this test.
+# RUN is deliberately applied only to this copied test project.
 sed -i \
     -e 's/TYPE SHARED/TYPE RUN/' \
     "${run_root}/source/CMakeLists.txt"
-sed -i \
-    -e 's/{ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16}/{ge::DT_FLOAT16, ge::DT_FLOAT}/g' \
-    -e 's/{ge::DT_INT32, ge::DT_INT32, ge::DT_INT32}/{ge::DT_INT32, ge::DT_INT32}/g' \
-    -e 's/{ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT}/{ge::DT_FLOAT, ge::DT_FLOAT}/g' \
-    -e 's/{ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND}/{ge::FORMAT_ND, ge::FORMAT_ND}/g' \
-    "${run_root}/source/op_host/sparse_flash_attention.cpp"
+if [[ "${mode}" == "control" ]]; then
+    # The verified official 303 OpDef declares FP16/FP32 pairs.  Restore that
+    # exact list only for the minimal Host control.
+    sed -i \
+        -e 's/{ge::DT_FLOAT16, ge::DT_FLOAT, ge::DT_BF16}/{ge::DT_FLOAT16, ge::DT_FLOAT}/g' \
+        -e 's/{ge::DT_INT32, ge::DT_INT32, ge::DT_INT32}/{ge::DT_INT32, ge::DT_INT32}/g' \
+        -e 's/{ge::DT_FLOAT, ge::DT_FLOAT, ge::DT_FLOAT}/{ge::DT_FLOAT, ge::DT_FLOAT}/g' \
+        -e 's/{ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND}/{ge::FORMAT_ND, ge::FORMAT_ND}/g' \
+        "${run_root}/source/op_host/sparse_flash_attention.cpp"
+fi
 
 build_log="${run_root}/logs/build-and-package.log"
 # CANN 8.5's RUN package does not make the per-SOC binary target a default
@@ -70,22 +78,29 @@ else
             if [[ -z "${set_env}" || -z "${custom_lib}" ]]; then
                 printf 'stage\tstatus\npackage\tPASS\ninstall\tMISSING_ARTIFACT\n' >"${run_root}/results/summary.tsv"
             else
-                workspace_log="${run_root}/logs/installed-opp-workspace.log"
+                test_log="${run_root}/logs/installed-opp-${mode}.log"
+                test_args=(D_rope_required --device "${device_id}")
+                result_stage=kernel_smoke
+                if [[ "${mode}" == "control" ]]; then
+                    test_args=(D_rope_required --workspace-only --device "${device_id}")
+                    result_stage=get_workspace
+                fi
                 # Do not preload or explicitly load a tiling .so here.  The
                 # installed OPP and ASCEND_CUSTOM_OPP_PATH must resolve it.
                 if env -u ASCEND_CUSTOM_OPP_PATH -u SPARSE_FLASH_ATTENTION_TILING_LIB \
                        -u LD_PRELOAD bash -c '
                            source "$1"
                            SPARSE_FLASH_ATTENTION_CUSTOM_LIB="$2" \
-                           timeout "$3" python3 -u "$4" D_rope_required \
-                               --workspace-only --device "$5"
+                           timeout "$3" python3 -u "$4" "${@:5}"
                        ' bash "${set_env}" "${custom_lib}" \
-                       "${SFA_910B_CASE_TIMEOUT:-180}" "${test_file}" "${device_id}" \
-                       >"${workspace_log}" 2>&1; then
-                    printf 'stage\tstatus\npackage\tPASS\ninstall\tPASS\nget_workspace\tPASS\n' \
+                       "${SFA_910B_CASE_TIMEOUT:-180}" "${test_file}" "${test_args[@]}" \
+                       >"${test_log}" 2>&1; then
+                    printf 'stage\tstatus\nmode\t%s\npackage\tPASS\ninstall\tPASS\n%s\tPASS\n' \
+                        "${mode}" "${result_stage}" \
                         >"${run_root}/results/summary.tsv"
                 else
-                    printf 'stage\tstatus\npackage\tPASS\ninstall\tPASS\nget_workspace\tFAIL\n' \
+                    printf 'stage\tstatus\nmode\t%s\npackage\tPASS\ninstall\tPASS\n%s\tFAIL\n' \
+                        "${mode}" "${result_stage}" \
                         >"${run_root}/results/summary.tsv"
                 fi
             fi
