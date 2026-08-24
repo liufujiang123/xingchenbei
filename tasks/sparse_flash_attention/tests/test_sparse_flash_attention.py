@@ -260,6 +260,48 @@ def deterministic_inputs(
     return tuple(np.ascontiguousarray(x, dtype=dtype) for x in (query, key, value, query_rope, key_rope))
 
 
+def make_random_independent_case(*, wide: bool) -> Case:
+    """Independent Q/K/V/RoPE coverage that cannot pass through K/V aliasing."""
+    rng = np.random.default_rng(20260825 if wide else 20260824)
+    if wide:
+        query = rng.uniform(-10.0, 100.0, (1, 1, 1, 512)).astype(np.float16)
+        key = rng.uniform(5.0, 100.0, (1, 32, 1, 512)).astype(np.float16)
+        value = rng.uniform(-10.0, 100.0, (1, 32, 1, 512)).astype(np.float16)
+        query_rope = rng.uniform(-10.0, 10.0, (1, 1, 1, 64)).astype(np.float16)
+        key_rope = rng.uniform(-10.0, 10.0, (1, 32, 1, 64)).astype(np.float16)
+        sparse_indices = np.asarray(
+            [[[[0, 2, 5, 7, 11, 13, 17, 19, 23, 29, 30, 31]]]], dtype=np.int32
+        )
+        name = "L_random_wide"
+        scale = 0.0884
+    else:
+        query = rng.normal(0.0, 0.2, (1, 3, 4, 512)).astype(np.float16)
+        key = rng.normal(0.0, 0.2, (1, 11, 1, 512)).astype(np.float16)
+        value = rng.uniform(-1.0, 1.0, (1, 11, 1, 512)).astype(np.float16)
+        query_rope = rng.normal(0.0, 0.2, (1, 3, 4, 64)).astype(np.float16)
+        key_rope = rng.normal(0.0, 0.2, (1, 11, 1, 64)).astype(np.float16)
+        sparse_indices = np.asarray(
+            [[[[0, 3, 6, 9, 10]], [[1, 2, 5, 7, 9]], [[0, 4, 6, 8, 10]]]],
+            dtype=np.int32,
+        )
+        name = "L_random_diffuse"
+        scale = 1.0 / np.sqrt(576.0)
+    return Case(
+        name=name,
+        query=np.ascontiguousarray(query),
+        key=np.ascontiguousarray(key),
+        value=np.ascontiguousarray(value),
+        sparse_indices=np.ascontiguousarray(sparse_indices),
+        actual_query=None,
+        actual_kv=None,
+        query_rope=np.ascontiguousarray(query_rope),
+        key_rope=np.ascontiguousarray(key_rope),
+        scale=scale,
+        sparse_mode=0,
+        return_aux=True,
+    )
+
+
 def make_case(
     name: str,
     sparse_rows: list[list[int]],
@@ -412,6 +454,8 @@ def build_910b_launch_cases() -> list[Case]:
                   dtype=fp16, sparse_block_size=128),
         make_case("L_batch2_bf16", rows(4, [0, 2, 5]), kvs=16, qn=4, b=2,
                   dtype=fp32, bf16=True),
+        make_random_independent_case(wide=False),
+        make_random_independent_case(wide=True),
     ]
 
 
