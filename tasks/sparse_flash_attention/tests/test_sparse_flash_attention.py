@@ -345,6 +345,15 @@ def build_cases() -> list[Case]:
             dtype=fp32,
             bf16=True,
         ),
+        make_case(
+            "J_actual_causal",
+            [[0, 2, 3], [1, 2, 3], [0, 1, 2]],
+            kvs=5,
+            dtype=fp16,
+            actual_query=2,
+            actual_kv=4,
+            sparse_mode=3,
+        ),
     ]
 
 
@@ -456,6 +465,13 @@ def cpu_reference(case: Case) -> tuple[np.ndarray, np.ndarray | None, np.ndarray
     max_output = np.full((bsz, 1, qs, qn), EMPTY_MAX, dtype=np.float64)
     sum_output = np.zeros((bsz, 1, qs, qn), dtype=np.float64)
     scale = float(np.float16(case.scale))
+    scale_experiment = os.environ.get("SFA_REFERENCE_SCALE", "attribute")
+    if scale_experiment == "half_attribute":
+        scale *= 0.5
+    elif scale_experiment == "inv_sqrt_512":
+        scale = 1.0 / np.sqrt(512.0)
+    elif scale_experiment == "inv_sqrt_576":
+        scale = 1.0 / np.sqrt(576.0)
 
     for b in range(bsz):
         query_len = qs if case.actual_query is None else min(max(int(case.actual_query[b]), 0), qs)
@@ -464,17 +480,36 @@ def cpu_reference(case: Case) -> tuple[np.ndarray, np.ndarray | None, np.ndarray
             positions = case.sparse_indices[b, q, 0].astype(np.int64)
             valid = (positions >= 0) & (positions < kv_len)
             if case.sparse_mode == 3:
-                valid &= positions <= q + kv_len - query_len
+                causal_experiment = os.environ.get("SFA_REFERENCE_CAUSAL", "right_down_actual")
+                if causal_experiment == "ordinary":
+                    causal_limit = q
+                elif causal_experiment == "right_down_physical":
+                    causal_limit = q + kvs - qs
+                else:
+                    causal_limit = q + kv_len - query_len
+                valid &= positions <= causal_limit
             positions = positions[valid]
             if positions.size == 0:
                 continue
             convert = bf16_storage_to_float32 if case.primary_acl_dtype == ACL_BF16 else lambda x: x
             selected_key = convert(case.key[b, positions, 0]).astype(np.float64)
             selected_rope = convert(case.key_rope[b, positions, 0]).astype(np.float64)
-            selected_value = convert(case.value[b, positions, 0]).astype(np.float64)
+            aggregate_key = os.environ.get("SFA_REFERENCE_AGGREGATION", "value") == "key"
+            selected_value = convert(
+                case.key[b, positions, 0] if aggregate_key else case.value[b, positions, 0]
+            ).astype(np.float64)
             query = convert(case.query[b, q]).astype(np.float64)
             query_rope = convert(case.query_rope[b, q]).astype(np.float64)
-            scores = (query @ selected_key.T + query_rope @ selected_rope.T) * scale
+            content_scores = query @ selected_key.T
+            rope_scores = (
+                np.zeros((qn, selected_rope.shape[0]), dtype=np.float64)
+                if os.environ.get("SFA_REFERENCE_ROPE", "enabled") == "disabled"
+                else query_rope @ selected_rope.T
+            )
+            if os.environ.get("SFA_REFERENCE_ROPE_SCALE", "scaled") == "unscaled":
+                scores = content_scores * scale + rope_scores
+            else:
+                scores = (content_scores + rope_scores) * scale
             row_max = scores.max(axis=1, keepdims=True)
             exponentials = np.exp(scores - row_max)
             row_sum = exponentials.sum(axis=1, keepdims=True)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import os
 
 import numpy as np
 
@@ -33,7 +34,11 @@ def blockwise_reference(case: base.Case) -> tuple[np.ndarray, np.ndarray | None,
             for block_index in block_indices:
                 if block_index < 0:
                     continue
-                block_start = int(block_index) * block_size
+                block_start = (
+                    int(block_index)
+                    if os.environ.get("SFA_REFERENCE_SPARSE_UNIT", "block") == "token_start"
+                    else int(block_index) * block_size
+                )
                 if block_start >= kv_len:
                     continue
                 for block_offset in range(block_size):

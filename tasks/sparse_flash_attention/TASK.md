@@ -157,7 +157,7 @@ The first implementation is intentionally correctness-oriented:
 - auxiliary-output mode uses one AIV core to avoid cross-core cache-line false sharing;
 - no Cube batching, UB gather aggregation, or performance tuning yet.
 
-The implementation builds under CANN 8.5 for `ascend910b` with FP16, FP32, and BF16 binaries. A temporary target-only `ascend910_93` mirror passed 11/11 deterministic local ACLNN/NumPy cases, including a true-launch BF16 case, and a 41/41 GetWorkspaceSize-only matrix covering all three same-dtype combinations. Submission `6a8a841282cffa8f16ab684b` reached Kernel result comparison on all three public cases before this compatibility-union revision, proving the prior `561002` came from custom Host over-validation rather than the Kernel mathematics.
+The implementation builds under CANN 8.5 for `ascend910b` with FP16, FP32, and BF16 binaries. A temporary target-only `ascend910_93` mirror passed 12/12 deterministic local ACLNN/NumPy cases, including true-launch BF16 and actual-length causal cases, and a 41/41 GetWorkspaceSize-only matrix covering all three same-dtype combinations. Submission `6a8a841282cffa8f16ab684b` reached Kernel result comparison on all three public cases before this compatibility-union revision, proving the prior `561002` came from custom Host over-validation rather than the Kernel mathematics.
 
 ## Remaining correctness questions for evaluator evidence
 

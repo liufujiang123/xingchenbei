@@ -75,6 +75,57 @@ cmake --build "${build_dir}" --parallel 2 2>&1 | tee "${log_dir}/build.log"
 custom_lib="${build_dir}/libcust_opapi.so"
 [[ -r "${custom_lib}" ]] || fail "generated ACLNN library is missing: ${custom_lib}"
 export SPARSE_FLASH_ATTENTION_CUSTOM_LIB="${custom_lib}"
+if grep -Fq 'constexpr bool AGGREGATE_KEY_INSTEAD_OF_VALUE = true;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_AGGREGATION=key
+else
+    export SFA_REFERENCE_AGGREGATION=value
+fi
+echo "SFA_REFERENCE_AGGREGATION=${SFA_REFERENCE_AGGREGATION}"
+if grep -Fq 'constexpr ScaleExperiment SCALE_EXPERIMENT = ScaleExperiment::HALF_ATTRIBUTE;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_SCALE=half_attribute
+elif grep -Fq 'constexpr ScaleExperiment SCALE_EXPERIMENT = ScaleExperiment::INV_SQRT_512;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_SCALE=inv_sqrt_512
+elif grep -Fq 'constexpr ScaleExperiment SCALE_EXPERIMENT = ScaleExperiment::INV_SQRT_576;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_SCALE=inv_sqrt_576
+else
+    export SFA_REFERENCE_SCALE=attribute
+fi
+echo "SFA_REFERENCE_SCALE=${SFA_REFERENCE_SCALE}"
+if grep -Fq 'constexpr bool ROPE_TERM_UNSCALED = true;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_ROPE_SCALE=unscaled
+else
+    export SFA_REFERENCE_ROPE_SCALE=scaled
+fi
+echo "SFA_REFERENCE_ROPE_SCALE=${SFA_REFERENCE_ROPE_SCALE}"
+if grep -Fq 'constexpr CausalExperiment CAUSAL_EXPERIMENT = CausalExperiment::ORDINARY;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_CAUSAL=ordinary
+elif grep -Fq 'constexpr CausalExperiment CAUSAL_EXPERIMENT = CausalExperiment::RIGHT_DOWN_PHYSICAL;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_CAUSAL=right_down_physical
+else
+    export SFA_REFERENCE_CAUSAL=right_down_actual
+fi
+echo "SFA_REFERENCE_CAUSAL=${SFA_REFERENCE_CAUSAL}"
+if grep -Fq 'constexpr bool SPARSE_INDEX_IS_TOKEN_START = true;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_SPARSE_UNIT=token_start
+else
+    export SFA_REFERENCE_SPARSE_UNIT=block
+fi
+echo "SFA_REFERENCE_SPARSE_UNIT=${SFA_REFERENCE_SPARSE_UNIT}"
+if grep -Fq 'constexpr bool DISABLE_ROPE_TERM = true;' \
+    "${mirror_source}/op_kernel/sparse_flash_attention.cpp"; then
+    export SFA_REFERENCE_ROPE=disabled
+else
+    export SFA_REFERENCE_ROPE=enabled
+fi
+echo "SFA_REFERENCE_ROPE=${SFA_REFERENCE_ROPE}"
 python -c 'import ctypes, os; ctypes.CDLL(os.environ["SPARSE_FLASH_ATTENTION_CUSTOM_LIB"], mode=ctypes.RTLD_GLOBAL); print("CUSTOM_SHARED_LIBRARY_LOAD_PASS=" + os.path.realpath(os.environ["SPARSE_FLASH_ATTENTION_CUSTOM_LIB"]))'
 
 timeout "${SPARSE_FLASH_ATTENTION_VALIDATE_TIMEOUT:-300}" \

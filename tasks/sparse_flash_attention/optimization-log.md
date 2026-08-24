@@ -11,6 +11,31 @@ Only measured experiments belong here.
 | official interface + permissive Host | remove non-template Host rejection while retaining Kernel-required metadata | local 10/10; GetWorkspace matrix 39/39; platform reaches comparison | - | retain | submission `6a8a841282cffa8f16ab684b`; Wrong Answer, public precision `0.134765625/0.216796875/0.08203125` |
 | 910B UB/Vector refactor | replace scalar GM access/dot/exp/value accumulation with contiguous copies and FP32 Vector operations; restore safe aux multicore | local base 10/10, block 2/2, stress 15/15, single/multi-core bitwise match; platform WA | local QN128 `0.094620 ms`; sparse 256/1024/4096 `0.269960/1.028820/4.035800 ms`; platform `26.92/28.22/32.70 ms` | retain performance work; platform semantics unresolved | submission `6a8b30fa82cffa8f16c9857e`; no Runtime Error; public precision `0.134765625/0.216796875/0`; platform speedup versus `6a8aa89b82cffa8f16b24329` is `42.1x/36.1x/86.0x` |
 
+## 2026-08-24 semantic experiment matrix
+
+The fixed comparison baseline is submission `6a8bada182cffa8f16d61eec`: FP16/FP32/BF16 union, vector kernel, `@V`, attribute scale, `(QK+RoPE)*scale`, actual-length right-down causal, block-id indices. Its public ratios are `0.134765625/0.216796875/0`.
+
+| Experiment | Single change | Local result | Submission | Platform case1/2/3 | Delta versus baseline |
+|---|---|---|---|---|---|
+| S1 aggregate K | final numerator reads K instead of V | A3 launch/reference PASS | `6a8bcd6682cffa8f16db9a3d` | `0.134765625/0.18359375/0.0771484375` | `0/-0.033203125/+0.0771484375` |
+| S2 half scale | use `attributeScale/2` | A3 launch/reference PASS | `6a8bce6582cffa8f16dbc908` | `0.134765625/0.2109375/0` | `0/-0.005859375/0` |
+| S3 unscaled RoPE | use `QK*scale+RoPE` | A3 launch/reference PASS | `6a8bcf8782cffa8f16dbf294` | `0.138671875/0.20703125/0` | `+0.00390625/-0.009765625/0` |
+| S4 ordinary causal | for mode 3 use `k<=q` | A3 launch/reference PASS | `6a8bd09a82cffa8f16dc19ac` | `0.09765625/0.216796875/0` | `-0.037109375/0/0` |
+| S5 physical right-down | actual lengths crop only; causal aligns physical QS/KVS | A3 actual-length causal PASS | `6a8bd1a882cffa8f16dc43dc` | `0.134765625/0.216796875/0` | `0/0/0` |
+| S6 token-start indices | block-size expansion begins at raw index | A3 block-wise 2/2 PASS | `6a8bd2bc82cffa8f16dc6ba3` | `0.134765625/0.216796875/0` | `0/0/0` |
+| S7 disable RoPE | omit RoPE dot from score | A3 launch/reference PASS | `6a8bd3a382cffa8f16dc96ba` | `0.134765625/0.21484375/0.08203125` | `0/-0.001953125/+0.08203125` |
+| C1 aggregate K + disable RoPE | combine the two case3-positive candidates | A3 launch/reference PASS | `6a8bd4a782cffa8f16dcc07a` | `0.134765625/0.1953125/0.0771484375` | `0/-0.021484375/+0.0771484375` |
+| C2 disable RoPE + half scale | combine the case3-positive candidate with scale | A3 launch/reference PASS | `6a8bd5c882cffa8f16dcf380` | `0.13671875/0.2109375/0.083984375` | `+0.001953125/-0.005859375/+0.083984375` |
+| S8 two-pass softmax | recompute fixed max, then fixed sum/numerator | A3 launch/reference PASS | `6a8bd71682cffa8f16dd1cb3` | `0.134765625/0.216796875/0` | `0/0/0`; platform time regressed to `39.38/41.46/51.96 ms` |
+
+Conclusions from this matrix:
+
+- Online versus two-pass softmax is precision-identical on all public cases, so the online recurrence is not the platform mismatch.
+- Ordinary causal is actively worse for case1. Physical-versus-actual right-down and token-start-versus-block-id are unobservable on the three public cases.
+- Disabling RoPE is the only single factor with a material positive result: it restores case3 from `0` to the old scalar candidate's `0.08203125`. This is diagnostic evidence, not authorization to violate the statement; the retained source keeps RoPE enabled.
+- `@K` and disabled RoPE do not add: their combination is worse than disabled RoPE alone. This suggests overlapping case3 effects rather than two independent fixes.
+- The generated ACLNN support list contains three same-dtype tuples, so the current package does not admit a mixed primary/RoPE dtype call. The remaining RoPE-specific possibilities include target-dependent 64-element Vector reduction/Exp behavior or a platform golden that diverges from the statement.
+
 ## 2026-08-23 retained 910B vector candidate
 
 - Hypothesis: scalar GM Q/K/V/RoPE/output access and scalar 512-wide arithmetic dominate the correctness baseline; whole-row UB transfers and FP32 Vector primitives should reduce instruction and GM transaction overhead without changing the online-softmax recurrence.

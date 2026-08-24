@@ -11,6 +11,25 @@ constexpr uint64_t CONTENT_DIM = 512;
 constexpr uint64_t ROPE_DIM = 64;
 constexpr uint64_t AUX_ROWS_PER_GROUP = 8;
 constexpr float NEG_INF = -3.402823466e+38F;
+enum class ScaleExperiment : uint32_t {
+    ATTRIBUTE = 0,
+    HALF_ATTRIBUTE = 1,
+    INV_SQRT_512 = 2,
+    INV_SQRT_576 = 3,
+};
+enum class CausalExperiment : uint32_t {
+    RIGHT_DOWN_ACTUAL = 0,
+    ORDINARY = 1,
+    RIGHT_DOWN_PHYSICAL = 2,
+};
+
+constexpr bool AGGREGATE_KEY_INSTEAD_OF_VALUE = false;
+constexpr ScaleExperiment SCALE_EXPERIMENT = ScaleExperiment::ATTRIBUTE;
+constexpr bool ROPE_TERM_UNSCALED = false;
+constexpr CausalExperiment CAUSAL_EXPERIMENT = CausalExperiment::RIGHT_DOWN_ACTUAL;
+constexpr bool SPARSE_INDEX_IS_TOKEN_START = false;
+constexpr bool DISABLE_ROPE_TERM = false;
+constexpr bool TWO_PASS_SOFTMAX = false;
 }  // namespace
 
 template <class DT_QUERY>
@@ -38,7 +57,16 @@ public:
         returnSoftmaxLse_ = tiling.returnSoftmaxLse;
         usedCoreNum_ = tiling.usedCoreNum;
         // The statement requires scaleValue to be processed at float16 precision.
-        scaleValue_ = static_cast<float>(static_cast<half>(tiling.scaleValue));
+        const float attributeScale = static_cast<float>(static_cast<half>(tiling.scaleValue));
+        if constexpr (SCALE_EXPERIMENT == ScaleExperiment::HALF_ATTRIBUTE) {
+            scaleValue_ = attributeScale * 0.5F;
+        } else if constexpr (SCALE_EXPERIMENT == ScaleExperiment::INV_SQRT_512) {
+            scaleValue_ = 0.04419417382415922F;
+        } else if constexpr (SCALE_EXPERIMENT == ScaleExperiment::INV_SQRT_576) {
+            scaleValue_ = 0.041666666666666664F;
+        } else {
+            scaleValue_ = attributeScale;
+        }
 
         queryGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(query));
         keyGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(key));
@@ -201,16 +229,26 @@ private:
         LoadVector(keyGm_, keyBase, CONTENT_DIM, kvRaw_, kvFp32_);
         const float contentDot = Dot(queryFp32_, kvFp32_, CONTENT_DIM);
 
-        const uint64_t keyRopeBase = (batch * kvSeqLen_ + keyPos) * ROPE_DIM;
-        LoadVector(keyRopeGm_, keyRopeBase, ROPE_DIM, keyRopeRaw_, keyRopeFp32_);
-        const float ropeDot = Dot(queryRopeFp32_, keyRopeFp32_, ROPE_DIM);
+        float ropeDot = 0.0F;
+        if constexpr (!DISABLE_ROPE_TERM) {
+            const uint64_t keyRopeBase = (batch * kvSeqLen_ + keyPos) * ROPE_DIM;
+            LoadVector(keyRopeGm_, keyRopeBase, ROPE_DIM, keyRopeRaw_, keyRopeFp32_);
+            ropeDot = Dot(queryRopeFp32_, keyRopeFp32_, ROPE_DIM);
+        }
+        if constexpr (ROPE_TERM_UNSCALED) {
+            return contentDot * scaleValue_ + ropeDot;
+        }
         return (contentDot + ropeDot) * scaleValue_;
     }
 
     __aicore__ inline void AccumulateValue(uint64_t batch, uint64_t keyPos,
                                            float alpha, float beta, bool first) {
         const uint64_t valueBase = (batch * kvSeqLen_ + keyPos) * CONTENT_DIM;
-        LoadVector(valueGm_, valueBase, CONTENT_DIM, kvRaw_, kvFp32_);
+        if constexpr (AGGREGATE_KEY_INSTEAD_OF_VALUE) {
+            LoadVector(keyGm_, valueBase, CONTENT_DIM, kvRaw_, kvFp32_);
+        } else {
+            LoadVector(valueGm_, valueBase, CONTENT_DIM, kvRaw_, kvFp32_);
+        }
         if (first) {
             AscendC::Muls(accumulator_, kvFp32_, beta, CONTENT_DIM);
         } else {
@@ -283,11 +321,93 @@ private:
         LoadVector(queryGm_, queryBase, CONTENT_DIM, queryRaw_, queryFp32_);
         LoadVector(queryRopeGm_, queryRopeBase, ROPE_DIM, queryRopeRaw_, queryRopeFp32_);
 
-        const int64_t causalLimit = sparseMode_ == 3
-            ? static_cast<int64_t>(queryPos) + static_cast<int64_t>(actualKvLen) -
-                  static_cast<int64_t>(actualQueryLen)
-            : static_cast<int64_t>(actualKvLen - 1U);
+        int64_t causalLimit = static_cast<int64_t>(actualKvLen - 1U);
+        if (sparseMode_ == 3) {
+            if constexpr (CAUSAL_EXPERIMENT == CausalExperiment::ORDINARY) {
+                causalLimit = static_cast<int64_t>(queryPos);
+            } else if constexpr (CAUSAL_EXPERIMENT == CausalExperiment::RIGHT_DOWN_PHYSICAL) {
+                causalLimit = static_cast<int64_t>(queryPos) +
+                              static_cast<int64_t>(kvSeqLen_) -
+                              static_cast<int64_t>(querySeqLen_);
+            } else {
+                causalLimit = static_cast<int64_t>(queryPos) +
+                              static_cast<int64_t>(actualKvLen) -
+                              static_cast<int64_t>(actualQueryLen);
+            }
+        }
         const uint64_t indexBase = (batch * querySeqLen_ + queryPos) * sparseSize_;
+
+        if constexpr (TWO_PASS_SOFTMAX) {
+            bool foundScore = false;
+            float fixedMax = NEG_INF;
+            for (uint64_t sparseOffset = 0; sparseOffset < sparseSize_; ++sparseOffset) {
+                const int64_t sparseBlockIndex = static_cast<int64_t>(
+                    sparseIndicesGm_.GetValue(indexBase + sparseOffset));
+                if (sparseBlockIndex < 0) {
+                    break;
+                }
+                const uint64_t blockStart = SPARSE_INDEX_IS_TOKEN_START
+                    ? static_cast<uint64_t>(sparseBlockIndex)
+                    : static_cast<uint64_t>(sparseBlockIndex) *
+                          static_cast<uint64_t>(sparseBlockSize_);
+                if (blockStart >= actualKvLen) {
+                    continue;
+                }
+                for (uint64_t blockOffset = 0; blockOffset < sparseBlockSize_; ++blockOffset) {
+                    const uint64_t keyPos = blockStart + blockOffset;
+                    if (keyPos >= actualKvLen) {
+                        break;
+                    }
+                    if (static_cast<int64_t>(keyPos) > causalLimit) {
+                        continue;
+                    }
+                    const float score = ComputeScore(batch, keyPos);
+                    fixedMax = !foundScore || score > fixedMax ? score : fixedMax;
+                    foundScore = true;
+                }
+            }
+            if (!foundScore) {
+                StoreAttention(row, 1.0F, true);
+                rowMax = NEG_INF;
+                rowSum = 0.0F;
+                return;
+            }
+
+            bool firstValue = true;
+            float fixedSum = 0.0F;
+            for (uint64_t sparseOffset = 0; sparseOffset < sparseSize_; ++sparseOffset) {
+                const int64_t sparseBlockIndex = static_cast<int64_t>(
+                    sparseIndicesGm_.GetValue(indexBase + sparseOffset));
+                if (sparseBlockIndex < 0) {
+                    break;
+                }
+                const uint64_t blockStart = SPARSE_INDEX_IS_TOKEN_START
+                    ? static_cast<uint64_t>(sparseBlockIndex)
+                    : static_cast<uint64_t>(sparseBlockIndex) *
+                          static_cast<uint64_t>(sparseBlockSize_);
+                if (blockStart >= actualKvLen) {
+                    continue;
+                }
+                for (uint64_t blockOffset = 0; blockOffset < sparseBlockSize_; ++blockOffset) {
+                    const uint64_t keyPos = blockStart + blockOffset;
+                    if (keyPos >= actualKvLen) {
+                        break;
+                    }
+                    if (static_cast<int64_t>(keyPos) > causalLimit) {
+                        continue;
+                    }
+                    const float weight = ExpNegative(ComputeScore(batch, keyPos) - fixedMax);
+                    fixedSum += weight;
+                    AccumulateValue(batch, keyPos, 1.0F, weight, firstValue);
+                    firstValue = false;
+                }
+            }
+            StoreAttention(row, fixedSum, false);
+            rowMax = fixedMax;
+            rowSum = fixedSum;
+            return;
+        }
+
         bool hasValue = false;
         float runningMax = NEG_INF;
         float runningSum = 0.0F;
@@ -301,8 +421,10 @@ private:
                 break;
             }
 
-            const uint64_t blockStart = static_cast<uint64_t>(sparseBlockIndex) *
-                                        static_cast<uint64_t>(sparseBlockSize_);
+            const uint64_t blockStart = SPARSE_INDEX_IS_TOKEN_START
+                ? static_cast<uint64_t>(sparseBlockIndex)
+                : static_cast<uint64_t>(sparseBlockIndex) *
+                      static_cast<uint64_t>(sparseBlockSize_);
             if (blockStart >= actualKvLen) {
                 continue;
             }
