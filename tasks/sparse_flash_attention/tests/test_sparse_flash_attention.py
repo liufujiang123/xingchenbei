@@ -226,29 +226,33 @@ def deterministic_inputs(
     qn: int,
     dtype: np.dtype,
     *,
+    b: int = 1,
     rope_only: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     content = ((np.arange(512, dtype=np.float32) % 17) - 8.0) / 64.0
     key_content = ((np.arange(512, dtype=np.float32) % 19) - 9.0) / 72.0
-    query = np.empty((1, qs, qn, 512), dtype=np.float32)
-    key = np.empty((1, kvs, 1, 512), dtype=np.float32)
-    value = np.empty((1, kvs, 1, 512), dtype=np.float32)
-    for q in range(qs):
-        for h in range(qn):
-            query[0, q, h] = content * (q + 1) * (h + 1) + (h - q) / 128.0
-    for k in range(kvs):
-        key[0, k, 0] = key_content * (k + 1) + k / 256.0
-        value[0, k, 0] = (k + 1) * 0.125 + content / 8.0
+    query = np.empty((b, qs, qn, 512), dtype=np.float32)
+    key = np.empty((b, kvs, 1, 512), dtype=np.float32)
+    value = np.empty((b, kvs, 1, 512), dtype=np.float32)
+    for batch in range(b):
+        for q in range(qs):
+            for h in range(qn):
+                query[batch, q, h] = (content * (q + 1) * (h + 1) +
+                                       (h - q + batch) / 128.0)
+        for k in range(kvs):
+            key[batch, k, 0] = key_content * (k + 1) + (k + batch) / 256.0
+            value[batch, k, 0] = (k + 1 + batch) * 0.125 + content / 8.0
 
     rope_base = ((np.arange(64, dtype=np.float32) % 11) - 5.0) / 16.0
-    query_rope = np.empty((1, qs, qn, 64), dtype=np.float32)
-    key_rope = np.empty((1, kvs, 1, 64), dtype=np.float32)
-    for q in range(qs):
-        for h in range(qn):
-            query_rope[0, q, h] = rope_base * (q + 1) * (h + 1)
-    for k in range(kvs):
-        sign = -1.0 if k % 2 else 1.0
-        key_rope[0, k, 0] = rope_base * sign * (k + 1)
+    query_rope = np.empty((b, qs, qn, 64), dtype=np.float32)
+    key_rope = np.empty((b, kvs, 1, 64), dtype=np.float32)
+    for batch in range(b):
+        for q in range(qs):
+            for h in range(qn):
+                query_rope[batch, q, h] = rope_base * (q + 1) * (h + 1 + batch)
+        for k in range(kvs):
+            sign = -1.0 if (k + batch) % 2 else 1.0
+            key_rope[batch, k, 0] = rope_base * sign * (k + 1)
 
     if rope_only:
         query.fill(0.0)
@@ -262,26 +266,29 @@ def make_case(
     *,
     kvs: int,
     qn: int = 1,
+    b: int = 1,
     dtype: np.dtype = np.dtype(np.float16),
     actual_query: int | None = None,
     actual_kv: int | None = None,
     scale: float = 0.125,
     sparse_mode: int = 0,
+    sparse_block_size: int = 1,
     return_aux: bool = True,
     rope_only: bool = False,
     bf16: bool = False,
 ) -> Case:
     qs = len(sparse_rows)
     query, key, value, query_rope, key_rope = deterministic_inputs(
-        qs, kvs, qn, dtype, rope_only=rope_only
+        qs, kvs, qn, dtype, b=b, rope_only=rope_only
     )
     if bf16:
         query, key, value, query_rope, key_rope = (
             float32_to_bf16_storage(x) for x in (query, key, value, query_rope, key_rope)
         )
     indices = np.asarray(sparse_rows, dtype=np.int32).reshape(1, qs, 1, -1)
-    actual_query_array = None if actual_query is None else np.asarray([actual_query], dtype=np.int32)
-    actual_kv_array = None if actual_kv is None else np.asarray([actual_kv], dtype=np.int32)
+    indices = np.repeat(indices, b, axis=0)
+    actual_query_array = None if actual_query is None else np.full((b,), actual_query, dtype=np.int32)
+    actual_kv_array = None if actual_kv is None else np.full((b,), actual_kv, dtype=np.int32)
     case = Case(
         name,
         query,
@@ -296,6 +303,7 @@ def make_case(
         sparse_mode,
         return_aux,
         ACL_BF16 if bf16 else None,
+        sparse_block_size,
     )
     if rope_only:
         expected, _, _ = cpu_reference(case)
@@ -369,6 +377,41 @@ def build_cases() -> list[Case]:
             actual_kv=4,
             sparse_mode=3,
         ),
+    ]
+
+
+def build_910b_launch_cases() -> list[Case]:
+    """Nontrivial target-launch coverage outside the small regression set."""
+    fp16 = np.dtype(np.float16)
+    fp32 = np.dtype(np.float32)
+
+    def rows(qs: int, indices: list[int]) -> list[list[int]]:
+        return [indices[q % len(indices):] + indices[:q % len(indices)] for q in range(qs)]
+
+    return [
+        make_case("L_batch2_qn4", rows(8, [0, 2, 5]), kvs=16, qn=4, b=2, dtype=fp16),
+        make_case("L_batch4_qn2", rows(4, [0, 3, 7]), kvs=16, qn=2, b=4, dtype=fp16),
+        make_case("L_qn128", [[0, 3, 7]], kvs=8, qn=128, dtype=fp16),
+        make_case(
+            "L_long_kv128_sparse16",
+            rows(16, list(range(0, 128, 8))),
+            kvs=128,
+            qn=8,
+            dtype=fp16,
+        ),
+        make_case("L_block2_batch2", rows(8, [0, 3, 7]), kvs=16, qn=2, b=2,
+                  dtype=fp16, sparse_block_size=2),
+        make_case("L_block4_causal", rows(8, [0, 3, 7]), kvs=32, qn=2,
+                  dtype=fp16, sparse_mode=3, sparse_block_size=4),
+        make_case("L_block8", rows(8, [0, 3, 7]), kvs=64, qn=2,
+                  dtype=fp32, sparse_block_size=8),
+        make_case("L_block16_actual", rows(8, [0, 3, 5]), kvs=96, qn=2, b=2,
+                  dtype=fp16, actual_query=6, actual_kv=96, sparse_mode=3,
+                  sparse_block_size=16),
+        make_case("L_block128", [[0, 1, 2]], kvs=384, qn=1,
+                  dtype=fp16, sparse_block_size=128),
+        make_case("L_batch2_bf16", rows(4, [0, 2, 5]), kvs=16, qn=4, b=2,
+                  dtype=fp32, bf16=True),
     ]
 
 
@@ -492,8 +535,20 @@ def cpu_reference(case: Case) -> tuple[np.ndarray, np.ndarray | None, np.ndarray
         query_len = qs if case.actual_query is None else min(max(int(case.actual_query[b]), 0), qs)
         kv_len = kvs if case.actual_kv is None else min(max(int(case.actual_kv[b]), 0), kvs)
         for q in range(query_len):
-            positions = case.sparse_indices[b, q, 0].astype(np.int64)
-            valid = (positions >= 0) & (positions < kv_len)
+            positions: list[int] = []
+            for sparse_block_index in case.sparse_indices[b, q, 0].astype(np.int64):
+                # The operator consumes block indices; a negative entry is an
+                # invalid suffix sentinel, matching the device loop.
+                if sparse_block_index < 0:
+                    break
+                block_start = int(sparse_block_index) * int(case.sparse_block_size)
+                if block_start >= kv_len:
+                    continue
+                for block_offset in range(case.sparse_block_size):
+                    key_pos = block_start + block_offset
+                    if key_pos >= kv_len:
+                        break
+                    positions.append(key_pos)
             if case.sparse_mode == 3:
                 causal_experiment = os.environ.get("SFA_REFERENCE_CAUSAL", "right_down_actual")
                 if causal_experiment == "ordinary":
@@ -502,10 +557,10 @@ def cpu_reference(case: Case) -> tuple[np.ndarray, np.ndarray | None, np.ndarray
                     causal_limit = q + kvs - qs
                 else:
                     causal_limit = q + kv_len - query_len
-                valid &= positions <= causal_limit
-            positions = positions[valid]
-            if positions.size == 0:
+                positions = [pos for pos in positions if pos <= causal_limit]
+            if not positions:
                 continue
+            positions = np.asarray(positions, dtype=np.int64)
             convert = bf16_storage_to_float32 if case.primary_acl_dtype == ACL_BF16 else lambda x: x
             selected_key = convert(case.key[b, positions, 0]).astype(np.float64)
             selected_rope = convert(case.key_rope[b, positions, 0]).astype(np.float64)
@@ -968,8 +1023,14 @@ def main() -> int:
         action="store_true",
         help="call GetWorkspaceSize for the selected regular correctness case without launching a kernel",
     )
+    parser.add_argument(
+        "--launch-matrix",
+        action="store_true",
+        help="run the nontrivial 910B target-launch correctness matrix",
+    )
     args = parser.parse_args()
-    cases = build_workspace_cases() if args.workspace_only_matrix else build_cases()
+    cases = (build_workspace_cases() if args.workspace_only_matrix else
+             build_910b_launch_cases() if args.launch_matrix else build_cases())
     selected = cases if args.case == "all" else [case for case in cases if case.name == args.case]
     if not selected:
         raise SystemExit(f"unknown case {args.case}; choices: {', '.join(case.name for case in cases)}")

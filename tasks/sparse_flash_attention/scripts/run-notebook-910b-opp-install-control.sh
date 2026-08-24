@@ -16,8 +16,8 @@ fail() { echo "SFA_910B_OPP_INSTALL_CONTROL_FAIL: $*" >&2; exit 1; }
 [[ -n "${ASCEND_HOME_PATH:-}" && -d "${ASCEND_HOME_PATH}" ]] || fail "ASCEND_HOME_PATH is invalid"
 [[ -r "${fixture}" ]] || fail "missing minimal Host fixture"
 [[ "${mode}" == "control" || "${mode}" == "production_smoke" || \
-   "${mode}" == "production_all" ]] || \
-    fail "SFA_910B_OPP_INSTALL_MODE must be control, production_smoke, or production_all"
+   "${mode}" == "production_all" || "${mode}" == "production_launch" ]] || \
+    fail "SFA_910B_OPP_INSTALL_MODE must be control, production_smoke, production_all, or production_launch"
 
 run_root=${SFA_910B_OPP_INSTALL_CONTROL_ROOT:-"${TMPDIR:-/tmp}/sfa-910b-opp-install-control"}
 if [[ -e "${run_root}" ]]; then
@@ -91,6 +91,9 @@ else
                     # and actual-length correctness cases on the installed OPP.
                     test_args=(all --device "${device_id}")
                     result_stage=kernel_matrix
+                elif [[ "${mode}" == "production_launch" ]]; then
+                    test_args=(all --launch-matrix --device "${device_id}")
+                    result_stage=kernel_launch_matrix
                 fi
                 # Do not preload or explicitly load a tiling .so here.  The
                 # installed OPP and ASCEND_CUSTOM_OPP_PATH must resolve it.
