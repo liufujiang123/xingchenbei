@@ -146,5 +146,9 @@ echo "===== SFA 910B PROBE SUMMARY ====="
 column -t -s $'\t' "${run_root}/results/summary.tsv" 2>/dev/null || \
     cat "${run_root}/results/summary.tsv"
 echo "RESULT_ARCHIVE=${archive}"
-echo "Upload that archive to the Codex chat; it contains no credentials."
-
+if [[ "${SFA_910B_PUSH_RESULTS:-0}" == "1" ]]; then
+    "${script_dir}/upload-910b-probe-results.sh" "${archive}"
+else
+    echo "Upload that archive to the Codex chat; it contains no credentials."
+    echo "Set SFA_910B_PUSH_RESULTS=1 after configuring GitHub write authentication to push it automatically."
+fi
