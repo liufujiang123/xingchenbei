@@ -544,8 +544,27 @@ class SparseFlashAttentionAclnn:
         library_path = os.environ.get("SPARSE_FLASH_ATTENTION_CUSTOM_LIB")
         if not library_path or not os.path.isfile(library_path):
             raise RuntimeError("SPARSE_FLASH_ATTENTION_CUSTOM_LIB must point to the generated shared library")
+        tiling_library_path = os.environ.get("SPARSE_FLASH_ATTENTION_TILING_LIB")
+        if tiling_library_path and not os.path.isfile(tiling_library_path):
+            raise RuntimeError(
+                "SPARSE_FLASH_ATTENTION_TILING_LIB must point to the generated tiling shared library"
+            )
         self.runtime = runtime
         self.nnopbase = ctypes.CDLL("libnnopbase.so", mode=ctypes.RTLD_GLOBAL)
+        # A packaged custom OPP loads the Host tiling library through its
+        # registry. Direct ACLNN tests load loose build artifacts, so retain an
+        # explicit handle when supplied; otherwise 561002 can occur before the
+        # Kernel is selected even though libcust_opapi itself loaded correctly.
+        self.tiling = (
+            None
+            if not tiling_library_path
+            else ctypes.CDLL(tiling_library_path, mode=ctypes.RTLD_GLOBAL)
+        )
+        if tiling_library_path:
+            print(
+                "TILING_SHARED_LIBRARY_LOAD_PASS=" + os.path.realpath(tiling_library_path),
+                flush=True,
+            )
         self.custom = ctypes.CDLL(library_path, mode=ctypes.RTLD_GLOBAL)
         self.nnopbase.aclCreateTensor.argtypes = [
             ctypes.POINTER(ctypes.c_int64),

@@ -102,12 +102,14 @@ for variant in "${variants[@]}"; do
     fi
 
     custom_lib="${build_dir}/libcust_opapi.so"
-    if [[ ! -r "${custom_lib}" ]]; then
-        printf '%s\tPASS\t-\tMISSING_CUSTOM_LIB\n' "${variant}" \
+    tiling_lib="${build_dir}/op_host/libcustom_ascendc_cust_optiling.so"
+    if [[ ! -r "${custom_lib}" || ! -r "${tiling_lib}" ]]; then
+        printf '%s\tPASS\t-\tMISSING_CUSTOM_OR_TILING_LIB\n' "${variant}" \
             >>"${run_root}/results/summary.tsv"
         continue
     fi
     export SPARSE_FLASH_ATTENTION_CUSTOM_LIB="${custom_lib}"
+    export SPARSE_FLASH_ATTENTION_TILING_LIB="${tiling_lib}"
     export SFA_REFERENCE_AGGREGATION=value
     export SFA_REFERENCE_SCALE=attribute
     export SFA_REFERENCE_ROPE_SCALE=scaled
