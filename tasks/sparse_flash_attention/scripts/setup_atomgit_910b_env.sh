@@ -192,7 +192,7 @@ EOF
     gh auth setup-git
     git config --global http.version HTTP/1.1
 
-    log "4/7 Verify GitHub repository access"
+    log "4/7 Verify GitHub authentication and repository permission"
     gh auth status --hostname github.com || {
         fail "GitHub CLI authentication is not healthy."
         return 1
@@ -211,27 +211,37 @@ EOF
         warn "Could not verify .permissions.push=true for $REPO_SLUG."
     fi
 
-    git_net "GitHub repository read test" ls-remote "$REPO_URL" HEAD >/dev/null
-    echo "Repository read authentication: PASS"
+    # Do not run a separate git ls-remote probe here. AtomGit's GitHub path can
+    # be intermittently slow, and the real fetch/clone below already validates
+    # Git read access. Keeping one Git transport transaction avoids paying for
+    # multiple independent TLS connections during every setup.
 
     log "5/7 Clone/update working repository"
     if [[ -d "$REPO_DIR/.git" ]]; then
         if [[ -n "$(git -C "$REPO_DIR" status --porcelain)" ]]; then
             warn "$REPO_DIR already exists and has local changes; leaving it untouched."
         else
-            git_net "git fetch" -C "$REPO_DIR" fetch origin "$BRANCH"
+            # Exactly one network Git operation for an existing clean repo.
+            # Fetch the requested branch into its remote-tracking ref, then
+            # fast-forward locally without a second network-backed `git pull`.
+            git_net "git fetch" -C "$REPO_DIR" fetch --no-tags origin \
+                "$BRANCH:refs/remotes/origin/$BRANCH"
+
             if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$BRANCH"; then
                 git -C "$REPO_DIR" checkout "$BRANCH"
-                git_net "git pull" -C "$REPO_DIR" pull --ff-only origin "$BRANCH"
+                git -C "$REPO_DIR" merge --ff-only "refs/remotes/origin/$BRANCH"
             else
-                git -C "$REPO_DIR" checkout -b "$BRANCH" "origin/$BRANCH"
+                git -C "$REPO_DIR" checkout -b "$BRANCH" --track "origin/$BRANCH"
             fi
+            echo "Repository fetch/update: PASS"
         fi
     elif [[ -e "$REPO_DIR" ]]; then
         fail "$REPO_DIR exists but is not a Git repository; move/remove it and rerun."
         return 1
     else
+        # New repo: clone itself is the single Git network transaction.
         clone_repo
+        echo "Repository clone: PASS"
     fi
     export SFA_REPO_ROOT="$REPO_DIR"
 
