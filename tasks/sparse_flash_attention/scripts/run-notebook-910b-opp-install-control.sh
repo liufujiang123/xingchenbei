@@ -50,6 +50,9 @@ if ! cmake -S "${run_root}/source" -B "${run_root}/build" \
         >>"${build_log}" 2>&1 || \
    ! cmake --build "${run_root}/build" --target SparseFlashAttention_ascend910b \
         --parallel "${SFA_910B_BUILD_JOBS:-2}" >>"${build_log}" 2>&1 || \
+   ! cmake --build "${run_root}/build" \
+        --target ascendc_kernels_ascendc_bin_ascend910b_gen_ops_config \
+        --parallel "${SFA_910B_BUILD_JOBS:-2}" >>"${build_log}" 2>&1 || \
    ! cpack --config "${run_root}/build/CPackConfig.cmake" >>"${build_log}" 2>&1; then
     printf 'stage\tstatus\npackage\tFAIL\n' >"${run_root}/results/summary.tsv"
 else
