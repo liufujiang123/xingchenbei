@@ -34,34 +34,33 @@ cp "${archive}" "${result_repo}/sfa-910b-probe-results.tar.gz"
 git -C "${result_repo}" add sfa-910b-probe-results.tar.gz metadata.txt
 git -C "${result_repo}" commit -q -m "test: upload SFA 910B probe result ${timestamp}"
 
-# Notebook clones normally use HTTPS, which can suffer transient GnuTLS
-# termination. Prefer GitHub's SSH-over-443 endpoint when a deploy/user key is
-# available; BatchMode guarantees that a missing key never prompts. HTTPS
-# through gh's credential helper remains the portable fallback.
-ssh_remote_url=
-if [[ "${remote_url}" =~ ^https://github\.com/(.+)\.git$ ]]; then
-    ssh_remote_url="ssh://git@ssh.github.com:443/${BASH_REMATCH[1]}.git"
-    git -C "${result_repo}" remote add ssh_origin "${ssh_remote_url}"
-fi
+# AtomGit notebooks are configured with GitHub CLI's HTTPS credential helper.
+# Do not probe SSH-over-443 here: fresh notebook environments normally have no
+# SSH key/known_hosts state, which only produces a misleading host-key failure.
+# Force HTTP/1.1 because this environment has shown intermittent HTTP/2/GnuTLS
+# termination, and retry transient failures without re-running the probe.
 push_ok=0
-if [[ -n "${ssh_remote_url}" ]]; then
-    if GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10" \
-        git -C "${result_repo}" push ssh_origin "HEAD:refs/heads/${result_branch}"; then
-        push_ok=1
-    else
-        echo "SFA_910B_RESULT_UPLOAD_SSH443_UNAVAILABLE=1" >&2
-    fi
-fi
-for attempt in 1 2 3; do
-    [[ ${push_ok} -eq 0 ]] || break
-    if git -C "${result_repo}" -c http.version=HTTP/1.1 \
+retry_count=${SFA_910B_RESULT_UPLOAD_RETRIES:-6}
+push_timeout=${SFA_910B_RESULT_UPLOAD_TIMEOUT:-90}
+retry_delay=${SFA_910B_RESULT_UPLOAD_RETRY_DELAY:-10}
+
+for ((attempt=1; attempt<=retry_count; attempt++)); do
+    if GIT_TERMINAL_PROMPT=0 timeout "${push_timeout}" \
+        git -C "${result_repo}" -c http.version=HTTP/1.1 \
         push origin "HEAD:refs/heads/${result_branch}"; then
         push_ok=1
         break
     fi
-    echo "SFA_910B_RESULT_UPLOAD_RETRY=${attempt}" >&2
+
+    status=$?
+    echo "SFA_910B_RESULT_UPLOAD_RETRY=${attempt}/${retry_count} status=${status}" >&2
+    if (( attempt < retry_count )); then
+        sleep "${retry_delay}"
+    fi
 done
-[[ ${push_ok} -eq 1 ]] || fail "GitHub result push failed after three HTTP/1.1 attempts"
+
+[[ ${push_ok} -eq 1 ]] || \
+    fail "GitHub HTTPS result push failed after ${retry_count} attempts"
 
 echo "RESULT_PUSH_BRANCH=${result_branch}"
 echo "RESULT_PUSH=PASS"
