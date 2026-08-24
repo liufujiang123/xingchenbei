@@ -1,0 +1,3 @@
+source_commit=6ad3bad0e4e2bccfe252e77e4207030f22ecba0b
+created_utc=20260824T124428Z
+archive_sha256=349a5812ae496db542f1146dfb3b74c47e9f85f08eba86d96d7cdc2a972f8f23
