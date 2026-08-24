@@ -33,8 +33,27 @@ cp "${archive}" "${result_repo}/sfa-910b-probe-results.tar.gz"
 } >"${result_repo}/metadata.txt"
 git -C "${result_repo}" add sfa-910b-probe-results.tar.gz metadata.txt
 git -C "${result_repo}" commit -q -m "test: upload SFA 910B probe result ${timestamp}"
+
+# Notebook clones normally use HTTPS, which can suffer transient GnuTLS
+# termination. Prefer GitHub's SSH-over-443 endpoint when a deploy/user key is
+# available; BatchMode guarantees that a missing key never prompts. HTTPS
+# through gh's credential helper remains the portable fallback.
+ssh_remote_url=
+if [[ "${remote_url}" =~ ^https://github\.com/(.+)\.git$ ]]; then
+    ssh_remote_url="ssh://git@ssh.github.com:443/${BASH_REMATCH[1]}.git"
+    git -C "${result_repo}" remote add ssh_origin "${ssh_remote_url}"
+fi
 push_ok=0
+if [[ -n "${ssh_remote_url}" ]]; then
+    if GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10" \
+        git -C "${result_repo}" push ssh_origin "HEAD:refs/heads/${result_branch}"; then
+        push_ok=1
+    else
+        echo "SFA_910B_RESULT_UPLOAD_SSH443_UNAVAILABLE=1" >&2
+    fi
+fi
 for attempt in 1 2 3; do
+    [[ ${push_ok} -eq 0 ]] || break
     if git -C "${result_repo}" -c http.version=HTTP/1.1 \
         push origin "HEAD:refs/heads/${result_branch}"; then
         push_ok=1
